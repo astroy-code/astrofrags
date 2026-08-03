@@ -1,5 +1,6 @@
 import { spawn } from 'child_process'
 import ffmpegPath from './ffmpegBinary'
+import { getBundledLogoPath } from './assetPath'
 import type { BrandingSettings } from './brandingSettings'
 
 /** ffmpeg's drawtext filter treats backslash, colon, single-quote, and percent as syntax
@@ -78,10 +79,11 @@ export function buildLowerThirdFilter(text: string, inLabel: string, outLabel: s
 }
 
 /** Renders a standalone branding card (intro or outro) as its own small mp4: a solid
- * accent-color background, the logo (if set) and display name centered, with a brief
- * fade in/out. Kept as a fully separate ffmpeg render (its own spawn) rather than folded
- * into the main reel's filter graph, so the main concat/crossfade pipeline in exportReel.ts
- * never has to know cards exist — a card is just another clip to it. */
+ * accent-color background, the (bundled, permanent) Astrofrags logo and display name
+ * centered, with a brief fade in/out. Kept as a fully separate ffmpeg render (its own spawn)
+ * rather than folded into the main reel's filter graph, so the main concat/crossfade
+ * pipeline in exportReel.ts never has to know cards exist — a card is just another clip to
+ * it. */
 export async function renderBrandingCard(
   kind: 'intro' | 'outro',
   settings: BrandingSettings,
@@ -100,28 +102,22 @@ export async function renderBrandingCard(
     '-f', 'lavfi', '-i', `color=c=${settings.accentColor}:s=${width}x${height}:d=${duration}:r=${CANONICAL_FRAME_RATE}`,
     // anullsrc has no duration of its own (unlike color's `d=`), so it needs an explicit -t
     // as an input option (placed before its -i) or it'd stream silence forever.
-    '-t', String(duration), '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo'
-  ]
-
-  const hasLogo = Boolean(settings.logoPath)
-  if (hasLogo) {
+    '-t', String(duration), '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
     // A still image is a single frame — loop it so it's available for the whole card
     // duration instead of vanishing after the overlay filter's first output frame.
-    args.push('-loop', '1', '-i', settings.logoPath as string)
-  }
+    '-loop', '1', '-i', getBundledLogoPath()
+  ]
 
   const nameEscaped = escapeDrawtext(settings.displayName)
   const filterStages: string[] = []
   let videoLabel = '[0:v]'
 
-  if (hasLogo) {
-    filterStages.push('[2:v]scale=-1:300[card_logo]')
-    // shortest=1: same reasoning as buildWatermarkFilter above — the looped logo never
-    // ends, and this render's own trailing -t output flag is the only other thing that
-    // would otherwise stop it, which is one guard rail too few for comfort.
-    filterStages.push(`${videoLabel}[card_logo]overlay=(W-w)/2:(H-h)/2-80:shortest=1[card_withlogo]`)
-    videoLabel = '[card_withlogo]'
-  }
+  filterStages.push('[2:v]scale=-1:300[card_logo]')
+  // shortest=1: same reasoning as buildWatermarkFilter above — the looped logo never
+  // ends, and this render's own trailing -t output flag is the only other thing that
+  // would otherwise stop it, which is one guard rail too few for comfort.
+  filterStages.push(`${videoLabel}[card_logo]overlay=(W-w)/2:(H-h)/2-80:shortest=1[card_withlogo]`)
+  videoLabel = '[card_withlogo]'
 
   filterStages.push(
     `${videoLabel}drawtext=fontfile='${FONT_PATH}':text='${nameEscaped}':fontsize=64:fontcolor=white:` +

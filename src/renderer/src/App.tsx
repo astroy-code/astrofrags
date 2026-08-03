@@ -41,14 +41,12 @@ type WatermarkCorner = (typeof WATERMARK_CORNERS)[number]['value']
 
 interface BrandingSettings {
   displayName: string
-  logoPath: string | null
   accentColor: string
   introEnabled: boolean
   outroEnabled: boolean
   introDurationSeconds: number
   lowerThirdEnabled: boolean
   lowerThirdText: string
-  watermarkEnabled: boolean
   watermarkCorner: WatermarkCorner
 }
 
@@ -506,14 +504,6 @@ export default function App(): JSX.Element {
     })
   }
 
-  async function handleSelectLogo(): Promise<void> {
-    const path = await window.api.selectLogo()
-    if (path) updateBranding({ logoPath: path })
-  }
-
-  function handleRemoveLogo(): void {
-    updateBranding({ logoPath: null })
-  }
 
   async function handlePreviewCaptions(id: number): Promise<void> {
     const clip = clips.find((c) => c.id === id)
@@ -766,20 +756,6 @@ export default function App(): JSX.Element {
                 onChange={(e) => updateBranding({ accentColor: e.target.value })}
               />
             </label>
-            <button onClick={handleSelectLogo} style={{ padding: '4px 10px', cursor: 'pointer' }}>
-              {branding.logoPath ? 'Change logo' : 'Choose logo'}
-            </button>
-            {branding.logoPath && (
-              <>
-                <span style={{ color: '#999', fontSize: 12 }}>{basename(branding.logoPath)}</span>
-                <button
-                  onClick={handleRemoveLogo}
-                  style={{ padding: '4px 10px', cursor: 'pointer', color: '#ff6b6b' }}
-                >
-                  Remove logo
-                </button>
-              </>
-            )}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -831,14 +807,7 @@ export default function App(): JSX.Element {
               />
             )}
             <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <input
-                type="checkbox"
-                checked={branding.watermarkEnabled}
-                onChange={(e) => updateBranding({ watermarkEnabled: e.target.checked })}
-              />
-              Watermark
-            </label>
-            {branding.watermarkEnabled && (
+              Watermark corner
               <select
                 value={branding.watermarkCorner}
                 onChange={(e) => updateBranding({ watermarkCorner: e.target.value as WatermarkCorner })}
@@ -850,11 +819,12 @@ export default function App(): JSX.Element {
                   </option>
                 ))}
               </select>
-            )}
+            </label>
           </div>
           <p style={{ color: '#777', fontSize: 12, marginBottom: 0, marginTop: 8 }}>
-            Watermark and lower-third apply to every export. Intro/outro cards only apply when combining clips into
-            a reel.
+            The Astrofrags watermark applies to every export automatically and can't be turned off.
+            Lower-third applies to every export when enabled above. Intro/outro cards only apply when combining
+            clips into a reel.
           </p>
         </div>
       )}

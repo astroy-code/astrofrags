@@ -1,6 +1,6 @@
 {
   "name": "astrofrags",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Astrofrags — local video import, ffmpeg audio/visual highlight detection, and clip/reel editing.",
   "main": "./out/main/index.js",
   "private": true,
@@ -54,14 +54,16 @@
     "artifactName": "${productName}-Setup-${version}.${ext}",
     "files": [
       "out/**/*",
-      "package.json"
+      "package.json",
+      "assets/astrofrags-logo.png"
     ],
     "asarUnpack": [
       "**/node_modules/ffmpeg-static/**",
       "**/node_modules/sharp/**",
       "**/node_modules/onnxruntime-node/**",
       "**/node_modules/tesseract.js/**",
-      "**/node_modules/tesseract.js-core/**"
+      "**/node_modules/tesseract.js-core/**",
+      "assets/astrofrags-logo.png"
     ],
     "win": {
       "target": "nsis"

@@ -3,6 +3,7 @@ import ffmpegPath from './ffmpegBinary'
 import { escapeSubtitlesPath } from './subtitlesPath'
 import { buildReframeFilter, presetBitrate, type ExportPreset } from './exportPresets'
 import { buildWatermarkFilter, buildLowerThirdFilter, LOUDNORM_FILTER } from './branding'
+import { getBundledLogoPath } from './assetPath'
 import type { BrandingSettings } from './brandingSettings'
 
 export async function renderClip(
@@ -40,15 +41,15 @@ export async function renderClip(
     videoLabel = '[captioned]'
   }
 
-  const hasWatermark = Boolean(branding?.watermarkEnabled && branding.logoPath)
-  if (hasWatermark) {
-    // The logo input must be added before the trailing -t below (anything before the last
-    // -i is parsed as an input option for that upcoming input, not an output option) — and
-    // -loop 1 keeps this single-frame still image available for the clip's whole duration.
-    args.push('-loop', '1', '-i', branding!.logoPath as string)
-    filterStages.push(buildWatermarkFilter(1, branding!.watermarkCorner, videoLabel, '[watermarked]'))
-    videoLabel = '[watermarked]'
-  }
+  // The bundled Astrofrags logo is a permanent watermark on every export — not a toggle,
+  // not user-replaceable. The logo input must be added before the trailing -t below
+  // (anything before the last -i is parsed as an input option for that upcoming input, not
+  // an output option) — and -loop 1 keeps this single-frame still image available for the
+  // clip's whole duration.
+  args.push('-loop', '1', '-i', getBundledLogoPath())
+  filterStages.push(buildWatermarkFilter(1, branding?.watermarkCorner ?? 'bottom-right', videoLabel, '[watermarked]'))
+  videoLabel = '[watermarked]'
+
   if (branding?.lowerThirdEnabled) {
     const text = branding.lowerThirdText || branding.displayName
     filterStages.push(buildLowerThirdFilter(text, videoLabel, '[lowerthird]'))

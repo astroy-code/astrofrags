@@ -38,7 +38,6 @@ const api = {
     return () => ipcRenderer.removeListener('update:status', listener)
   },
   installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install'),
-  selectLogo: (): Promise<string | null> => ipcRenderer.invoke('dialog:selectLogo'),
   getBrandingSettings: (): Promise<BrandingSettings> => ipcRenderer.invoke('settings:getBranding'),
   saveBrandingSettings: (settings: BrandingSettings): Promise<void> =>
     ipcRenderer.invoke('settings:saveBranding', settings),

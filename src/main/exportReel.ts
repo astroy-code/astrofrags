@@ -14,6 +14,7 @@ import {
   CANONICAL_CARD_RESOLUTION,
   CANONICAL_FRAME_RATE
 } from './branding'
+import { getBundledLogoPath } from './assetPath'
 import type { BrandingSettings } from './brandingSettings'
 
 interface ClipRange {
@@ -265,15 +266,17 @@ export async function renderReel(clips: ClipRange[], outputPath: string, options
   }
 
   // Watermark/lower-third run last on the video chain, on top of the fully composed frame,
-  // so they sit correctly at the final canvas's actual dimensions.
-  if (branding?.watermarkEnabled && branding.logoPath) {
-    const logoInputIndex = nextInputIndex++
-    // A still image is a single frame — loop it so it's available for the reel's whole
-    // duration instead of vanishing after the overlay filter's first output frame.
-    args.push('-loop', '1', '-i', branding.logoPath)
-    filterParts.push(buildWatermarkFilter(logoInputIndex, branding.watermarkCorner, videoLabel, '[watermarked]'))
-    videoLabel = '[watermarked]'
-  }
+  // so they sit correctly at the final canvas's actual dimensions. The bundled Astrofrags
+  // logo is a permanent watermark on every reel — not a toggle, not user-replaceable.
+  const logoInputIndex = nextInputIndex++
+  // A still image is a single frame — loop it so it's available for the reel's whole
+  // duration instead of vanishing after the overlay filter's first output frame.
+  args.push('-loop', '1', '-i', getBundledLogoPath())
+  filterParts.push(
+    buildWatermarkFilter(logoInputIndex, branding?.watermarkCorner ?? 'bottom-right', videoLabel, '[watermarked]')
+  )
+  videoLabel = '[watermarked]'
+
   if (branding?.lowerThirdEnabled) {
     const text = branding.lowerThirdText || branding.displayName
     filterParts.push(buildLowerThirdFilter(text, videoLabel, '[lowerthird]'))

@@ -110,15 +110,6 @@ ipcMain.handle('dialog:selectFolder', async () => {
   return result.filePaths[0]
 })
 
-ipcMain.handle('dialog:selectLogo', async () => {
-  const result = await dialog.showOpenDialog({
-    properties: ['openFile'],
-    filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg'] }]
-  })
-  if (result.canceled || result.filePaths.length === 0) return null
-  return result.filePaths[0]
-})
-
 ipcMain.handle('settings:getBranding', () => loadBrandingSettings())
 
 ipcMain.handle('settings:saveBranding', (_event, settings: BrandingSettings) => saveBrandingSettings(settings))

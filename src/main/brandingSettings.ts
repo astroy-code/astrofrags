@@ -4,27 +4,23 @@ import { readFile, writeFile } from 'fs/promises'
 
 export interface BrandingSettings {
   displayName: string
-  logoPath: string | null
   accentColor: string
   introEnabled: boolean
   outroEnabled: boolean
   introDurationSeconds: number
   lowerThirdEnabled: boolean
   lowerThirdText: string
-  watermarkEnabled: boolean
   watermarkCorner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 }
 
 export const DEFAULT_BRANDING_SETTINGS: BrandingSettings = {
   displayName: 'Astroy',
-  logoPath: null,
   accentColor: '#1a1a2e',
   introEnabled: false,
   outroEnabled: false,
   introDurationSeconds: 3,
   lowerThirdEnabled: false,
   lowerThirdText: '',
-  watermarkEnabled: false,
   watermarkCorner: 'bottom-right'
 }
 
