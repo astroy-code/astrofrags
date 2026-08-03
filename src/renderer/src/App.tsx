@@ -115,8 +115,12 @@ export default function App(): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
   const nextPeakIdRef = useRef(0)
   const visualMarkerRegionsRef = useRef<RegionInstance[]>([])
+  const isProgrammaticRegionRef = useRef(false)
+  const waveformWrapperRef = useRef<HTMLDivElement>(null)
+  const manualDragStartXRef = useRef<number | null>(null)
 
   const [videoPath, setVideoPath] = useState<string | null>(null)
+  const [manualClipMode, setManualClipMode] = useState(false)
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const [peaks, setPeaks] = useState<DisplayPeak[]>([])
   const [status, setStatus] = useState<'idle' | 'analyzing' | 'ready' | 'error'>('idle')
@@ -216,7 +220,9 @@ export default function App(): JSX.Element {
       captionPreviewStatus: 'idle',
       captionPreviewError: null
     }
-    setClips((prev) => [...prev, newClip].sort((a, b) => a.start - b.start))
+    // Appended, not re-sorted by time — clips can be manually reordered afterward (see
+    // moveClip), and re-sorting on every add would silently undo that ordering.
+    setClips((prev) => [...prev, newClip])
     setActiveClipId(id)
     addClipRegion(newClip)
 
@@ -229,6 +235,10 @@ export default function App(): JSX.Element {
     const regions = regionsRef.current
     if (!regions) return undefined
 
+    // Suppresses the manual-clip-selection 'region-created' listener below — that listener
+    // can't otherwise tell "the app just added a marker/clip region" apart from "the user
+    // just drag-selected a new region", since both go through the same wavesurfer event.
+    isProgrammaticRegionRef.current = true
     const marker = regions.addRegion({
       start: peak.time,
       end: peak.time + 0.15,
@@ -236,6 +246,7 @@ export default function App(): JSX.Element {
       drag: false,
       resize: false
     })
+    isProgrammaticRegionRef.current = false
     marker.on('click', () => addOrFocusClip(peak))
     return marker
   }
@@ -378,10 +389,22 @@ export default function App(): JSX.Element {
     }
   }
 
+  // Shared by both addClipRegion (region created by us) and handleManualRegionCreated
+  // (region already created by wavesurfer's drag-selection) — either way, once a clip has
+  // a region, dragging/clicking it needs to behave identically.
+  function wireClipRegionEvents(id: number, region: RegionInstance): void {
+    region.on('update-end', () => {
+      setClips((prev) => prev.map((c) => (c.id === id ? { ...c, start: region.start, end: region.end } : c)))
+    })
+    region.on('click', () => setActiveClipId(id))
+    clipRegionsRef.current.set(id, region)
+  }
+
   function addClipRegion(clip: ClipItem): void {
     const regions = regionsRef.current
     if (!regions) return
 
+    isProgrammaticRegionRef.current = true
     const region = regions.addRegion({
       start: clip.start,
       end: clip.end,
@@ -389,11 +412,98 @@ export default function App(): JSX.Element {
       drag: true,
       resize: true
     })
-    region.on('update-end', () => {
-      setClips((prev) => prev.map((c) => (c.id === clip.id ? { ...c, start: region.start, end: region.end } : c)))
+    isProgrammaticRegionRef.current = false
+    wireClipRegionEvents(clip.id, region)
+  }
+
+  // Lets the user select an arbitrary span of the waveform as a clip, without needing a
+  // detected peak. wavesurfer's own drag-to-create-region feature (regions.enableDragSelection)
+  // looks like the obvious tool for this, but it doesn't work here: WaveSurfer permanently
+  // wires its own drag-to-seek pointer listener onto the waveform wrapper at creation time
+  // (since this app passes dragToSeek: true), and that listener fully consumes every drag
+  // gesture before enableDragSelection's own listener ever sees it — confirmed by reproducing
+  // it in isolation (enableDragSelection's 'region-created' simply never fired while
+  // dragToSeek was active). Fixed the same way the existing kill-feed region drawer on the
+  // <video> element already works: an absolutely-positioned transparent overlay, shown only
+  // in manual mode, with our own onMouseDown/mouseup tracking a drag and converting pixel
+  // position to time ourselves — a real region only gets created once the drag completes.
+  function handleManualClipMouseDown(e: React.MouseEvent): void {
+    if (!manualClipMode) return
+    manualDragStartXRef.current = e.clientX
+  }
+
+  function handleManualClipMouseUp(e: MouseEvent): void {
+    if (!manualClipMode || manualDragStartXRef.current === null || !videoPath) return
+    const ws = wavesurferRef.current
+    const regions = regionsRef.current
+    const wrapper = waveformWrapperRef.current
+    const startX = manualDragStartXRef.current
+    manualDragStartXRef.current = null
+    if (!ws || !regions || !wrapper) return
+
+    const duration = ws.getDuration()
+    if (duration <= 0) return
+    const rect = wrapper.getBoundingClientRect()
+    const xToTime = (clientX: number): number => {
+      const frac = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1)
+      return frac * duration
+    }
+    const start = Math.min(xToTime(startX), xToTime(e.clientX))
+    const end = Math.max(xToTime(startX), xToTime(e.clientX))
+    if (end - start < 0.2) return // a plain click, not really a drag selection
+
+    isProgrammaticRegionRef.current = true
+    const region = regions.addRegion({
+      start,
+      end,
+      color: 'rgba(91, 214, 141, 0.35)',
+      drag: true,
+      resize: true
     })
-    region.on('click', () => setActiveClipId(clip.id))
-    clipRegionsRef.current.set(clip.id, region)
+    isProgrammaticRegionRef.current = false
+
+    const id = nextPeakIdRef.current++
+    const newClip: ClipItem = {
+      id,
+      sourceVideoPath: videoPath,
+      start,
+      end,
+      captions: false,
+      exportStatus: 'idle',
+      exportedPath: null,
+      exportError: null,
+      captionsAdded: false,
+      captionPreview: null,
+      captionPreviewStatus: 'idle',
+      captionPreviewError: null
+    }
+    wireClipRegionEvents(id, region)
+    setClips((prev) => [...prev, newClip])
+    setActiveClipId(id)
+  }
+
+  useEffect(() => {
+    if (!manualClipMode) return
+    window.addEventListener('mouseup', handleManualClipMouseUp)
+    return () => window.removeEventListener('mouseup', handleManualClipMouseUp)
+  }, [manualClipMode, videoPath])
+
+  function toggleManualClipMode(): void {
+    setManualClipMode((prev) => !prev)
+  }
+
+  function moveClip(id: number, direction: 'up' | 'down'): void {
+    setClips((prev) => {
+      const index = prev.findIndex((c) => c.id === id)
+      if (index === -1) return prev
+      const targetIndex = direction === 'up' ? index - 1 : index + 1
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev
+      const next = [...prev]
+      const temp = next[index]
+      next[index] = next[targetIndex]
+      next[targetIndex] = temp
+      return next
+    })
   }
 
   async function loadVideo(path: string): Promise<void> {
@@ -967,7 +1077,47 @@ export default function App(): JSX.Element {
         <p style={{ color: '#ff6b6b' }}>Visual detection failed: {visualDetectError}</p>
       )}
 
-      <div ref={waveformRef} style={{ marginTop: 16, marginBottom: 16 }} />
+      {videoPath && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+          <button
+            onClick={toggleManualClipMode}
+            style={{
+              padding: '4px 10px',
+              cursor: 'pointer',
+              color: manualClipMode ? '#5bd68d' : undefined
+            }}
+          >
+            {manualClipMode ? 'Done adding' : 'Add clip manually'}
+          </button>
+          {manualClipMode && (
+            <span style={{ color: '#5bd68d', fontSize: 13 }}>
+              Click and drag on the waveform to select a clip — no detected moment needed.
+            </span>
+          )}
+        </div>
+      )}
+
+      <div ref={waveformWrapperRef} style={{ position: 'relative', marginTop: 16, marginBottom: 16 }}>
+        <div ref={waveformRef} />
+        {manualClipMode && (
+          <div
+            onMouseDown={handleManualClipMouseDown}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              // A plain z-index-less absolutely-positioned overlay still loses the hit-test
+              // to wavesurfer's own internal rendering layer despite being a later sibling —
+              // confirmed by reproducing it in isolation. An explicit z-index is what
+              // actually puts this overlay on top.
+              zIndex: 10,
+              cursor: 'crosshair'
+            }}
+          />
+        )}
+      </div>
 
       {clips.length > 0 && (
         <div style={{ marginBottom: 16 }}>
@@ -1074,7 +1224,7 @@ export default function App(): JSX.Element {
               style={{ width: '100%', maxHeight: 300, background: '#000', marginBottom: 16 }}
             />
           )}
-          {clips.map((clip) => (
+          {clips.map((clip, index) => (
             <div
               key={clip.id}
               style={{
@@ -1085,6 +1235,24 @@ export default function App(): JSX.Element {
               }}
             >
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <button
+                  onClick={() => moveClip(clip.id, 'up')}
+                  disabled={index === 0}
+                  title="Move earlier in the sequence"
+                  style={{ padding: '0 6px', cursor: 'pointer', lineHeight: 1.2 }}
+                >
+                  ▲
+                </button>
+                <button
+                  onClick={() => moveClip(clip.id, 'down')}
+                  disabled={index === clips.length - 1}
+                  title="Move later in the sequence"
+                  style={{ padding: '0 6px', cursor: 'pointer', lineHeight: 1.2 }}
+                >
+                  ▼
+                </button>
+              </div>
               <span style={{ color: '#777', fontSize: 11 }} title={clip.sourceVideoPath}>
                 {basename(clip.sourceVideoPath)}
               </span>
