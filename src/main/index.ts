@@ -13,6 +13,7 @@ import { buildSrt } from './srt'
 import { detectVisualActivity, type VisualRegion } from './visualDetection'
 import { startWatchingFolder, stopWatchingFolder } from './watchFolder'
 import { initAutoUpdater, installUpdateAndRestart } from './autoUpdate'
+import { loadBrandingSettings, saveBrandingSettings, type BrandingSettings } from './brandingSettings'
 
 let lastPreviewPath: string | null = null
 let lastReelPreviewPath: string | null = null
@@ -109,6 +110,19 @@ ipcMain.handle('dialog:selectFolder', async () => {
   return result.filePaths[0]
 })
 
+ipcMain.handle('dialog:selectLogo', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg'] }]
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]
+})
+
+ipcMain.handle('settings:getBranding', () => loadBrandingSettings())
+
+ipcMain.handle('settings:saveBranding', (_event, settings: BrandingSettings) => saveBrandingSettings(settings))
+
 ipcMain.handle('watch:start', (_event, folder: string) => {
   startWatchingFolder(folder, (filePath, createdAtMs) => {
     mainWindow?.webContents.send('watch:newClip', filePath, createdAtMs)
@@ -182,9 +196,10 @@ ipcMain.handle(
     if (result.canceled || !result.filePath) return null
 
     const srtPath = await generateSrtIfRequested(videoPath, start, end, captions, captionLines)
+    const branding = await loadBrandingSettings()
 
     try {
-      await renderClip(videoPath, start, end, result.filePath, srtPath, preset)
+      await renderClip(videoPath, start, end, result.filePath, srtPath, preset, branding)
     } finally {
       if (srtPath) unlink(srtPath).catch(() => {})
     }
@@ -224,6 +239,7 @@ ipcMain.handle(
     if (result.canceled || !result.filePath) return null
 
     const clipsWithSrt = await resolveClipsWithSrt(clips)
+    const branding = await loadBrandingSettings()
 
     try {
       await renderReel(clipsWithSrt, result.filePath, {
@@ -232,7 +248,8 @@ ipcMain.handle(
         transitionDuration,
         musicPath,
         muteOriginal,
-        preset
+        preset,
+        branding
       })
     } catch (err) {
       console.error('clip:exportReel failed:', err)
@@ -266,6 +283,7 @@ ipcMain.handle(
     const dir = join(app.getPath('temp'), 'highlight-editor')
     await mkdir(dir, { recursive: true })
     const outPath = join(dir, `${randomUUID()}-reel-preview.mp4`)
+    const branding = await loadBrandingSettings()
 
     try {
       await renderReel(clipsWithSrt, outPath, {
@@ -274,7 +292,8 @@ ipcMain.handle(
         transitionDuration,
         musicPath,
         muteOriginal,
-        preset
+        preset,
+        branding
       })
     } catch (err) {
       console.error('clip:previewReel failed:', err)

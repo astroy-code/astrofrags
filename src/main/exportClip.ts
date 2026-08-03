@@ -2,6 +2,8 @@ import { spawn } from 'child_process'
 import ffmpegPath from './ffmpegBinary'
 import { escapeSubtitlesPath } from './subtitlesPath'
 import { buildReframeFilter, presetBitrate, type ExportPreset } from './exportPresets'
+import { buildWatermarkFilter, buildLowerThirdFilter, LOUDNORM_FILTER } from './branding'
+import type { BrandingSettings } from './brandingSettings'
 
 export async function renderClip(
   videoPath: string,
@@ -9,7 +11,8 @@ export async function renderClip(
   end: number,
   outputPath: string,
   srtPath?: string,
-  preset: ExportPreset = 'original'
+  preset: ExportPreset = 'original',
+  branding?: BrandingSettings
 ): Promise<void> {
   if (!ffmpegPath) {
     throw new Error('ffmpeg-static binary not found')
@@ -20,16 +23,12 @@ export async function renderClip(
     throw new Error('Clip end must be after start')
   }
 
-  const args = [
-    '-y',
-    '-ss', String(start),
-    '-i', videoPath,
-    '-t', String(duration)
-  ]
+  const args = ['-y', '-ss', String(start), '-i', videoPath]
 
   // Reframe (if any) runs before captions so subtitles land on the finished vertical/square
   // canvas — burning them onto the pre-reframe source would duplicate blurry captions into
-  // the background layer too.
+  // the background layer too. Watermark/lower-third run last, on top of the fully composed
+  // frame, so they sit correctly at the final canvas's actual dimensions.
   const filterStages: string[] = []
   let videoLabel = '[0:v]'
   if (preset !== 'original') {
@@ -41,11 +40,35 @@ export async function renderClip(
     videoLabel = '[captioned]'
   }
 
-  if (filterStages.length > 0) {
-    // -filter_complex disables ffmpeg's automatic stream selection entirely, so the audio
-    // stream needs an explicit -map too, not just the filtered video output.
-    args.push('-filter_complex', filterStages.join('; '), '-map', videoLabel, '-map', '0:a')
+  const hasWatermark = Boolean(branding?.watermarkEnabled && branding.logoPath)
+  if (hasWatermark) {
+    // The logo input must be added before the trailing -t below (anything before the last
+    // -i is parsed as an input option for that upcoming input, not an output option) — and
+    // -loop 1 keeps this single-frame still image available for the clip's whole duration.
+    args.push('-loop', '1', '-i', branding!.logoPath as string)
+    filterStages.push(buildWatermarkFilter(1, branding!.watermarkCorner, videoLabel, '[watermarked]'))
+    videoLabel = '[watermarked]'
   }
+  if (branding?.lowerThirdEnabled) {
+    const text = branding.lowerThirdText || branding.displayName
+    filterStages.push(buildLowerThirdFilter(text, videoLabel, '[lowerthird]'))
+    videoLabel = '[lowerthird]'
+  }
+
+  // Loudness normalization always runs, unlike the opt-in video-side stages above — there's
+  // no real downside to consistent audio levels, so it isn't a toggle.
+  filterStages.push(`[0:a]${LOUDNORM_FILTER}[loudaudio]`)
+
+  args.push(
+    // Now unambiguously an output option: it's past every -i, so it limits the final output
+    // instead of being mistaken for an input option on whichever -i happens to follow it.
+    '-t', String(duration),
+    // -filter_complex disables ffmpeg's automatic stream selection entirely, so both the
+    // video and audio outputs need an explicit -map.
+    '-filter_complex', filterStages.join('; '),
+    '-map', videoLabel,
+    '-map', '[loudaudio]'
+  )
 
   const bitrate = presetBitrate(preset)
   args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast')

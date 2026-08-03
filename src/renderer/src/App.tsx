@@ -31,6 +31,27 @@ interface UpdateStatus {
   message?: string
 }
 
+const WATERMARK_CORNERS = [
+  { value: 'top-left', label: 'Top left' },
+  { value: 'top-right', label: 'Top right' },
+  { value: 'bottom-left', label: 'Bottom left' },
+  { value: 'bottom-right', label: 'Bottom right' }
+] as const
+type WatermarkCorner = (typeof WATERMARK_CORNERS)[number]['value']
+
+interface BrandingSettings {
+  displayName: string
+  logoPath: string | null
+  accentColor: string
+  introEnabled: boolean
+  outroEnabled: boolean
+  introDurationSeconds: number
+  lowerThirdEnabled: boolean
+  lowerThirdText: string
+  watermarkEnabled: boolean
+  watermarkCorner: WatermarkCorner
+}
+
 const EXPORT_PRESETS = [
   { value: 'original', label: 'Original (16:9)' },
   { value: 'vertical', label: 'Vertical — TikTok/Shorts/Reels (9:16)' },
@@ -114,6 +135,7 @@ export default function App(): JSX.Element {
   const [transitionDuration, setTransitionDuration] = useState(0.75)
   const [exportPreset, setExportPreset] = useState<ExportPreset>('original')
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
+  const [branding, setBranding] = useState<BrandingSettings | null>(null)
   const [musicPath, setMusicPath] = useState<string | null>(null)
   const [muteOriginal, setMuteOriginal] = useState(false)
   const [reelPreviewPath, setReelPreviewPath] = useState<string | null>(null)
@@ -471,6 +493,28 @@ export default function App(): JSX.Element {
     await window.api.installUpdate()
   }
 
+  useEffect(() => {
+    window.api.getBrandingSettings().then(setBranding)
+  }, [])
+
+  function updateBranding(patch: Partial<BrandingSettings>): void {
+    setBranding((prev) => {
+      if (!prev) return prev
+      const next = { ...prev, ...patch }
+      window.api.saveBrandingSettings(next)
+      return next
+    })
+  }
+
+  async function handleSelectLogo(): Promise<void> {
+    const path = await window.api.selectLogo()
+    if (path) updateBranding({ logoPath: path })
+  }
+
+  function handleRemoveLogo(): void {
+    updateBranding({ logoPath: null })
+  }
+
   async function handlePreviewCaptions(id: number): Promise<void> {
     const clip = clips.find((c) => c.id === id)
     if (!clip) return
@@ -700,6 +744,120 @@ export default function App(): JSX.Element {
           </select>
         </label>
       </div>
+
+      {branding && (
+        <div style={{ marginTop: 12, padding: 12, border: '1px solid #444', borderRadius: 4 }}>
+          <h3 style={{ marginTop: 0 }}>Branding</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 8 }}>
+            <label>
+              Display name{' '}
+              <input
+                type="text"
+                value={branding.displayName}
+                onChange={(e) => updateBranding({ displayName: e.target.value })}
+                style={{ width: 140 }}
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Accent color
+              <input
+                type="color"
+                value={branding.accentColor}
+                onChange={(e) => updateBranding({ accentColor: e.target.value })}
+              />
+            </label>
+            <button onClick={handleSelectLogo} style={{ padding: '4px 10px', cursor: 'pointer' }}>
+              {branding.logoPath ? 'Change logo' : 'Choose logo'}
+            </button>
+            {branding.logoPath && (
+              <>
+                <span style={{ color: '#999', fontSize: 12 }}>{basename(branding.logoPath)}</span>
+                <button
+                  onClick={handleRemoveLogo}
+                  style={{ padding: '4px 10px', cursor: 'pointer', color: '#ff6b6b' }}
+                >
+                  Remove logo
+                </button>
+              </>
+            )}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="checkbox"
+                checked={branding.introEnabled}
+                onChange={(e) => updateBranding({ introEnabled: e.target.checked })}
+              />
+              Intro card
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="checkbox"
+                checked={branding.outroEnabled}
+                onChange={(e) => updateBranding({ outroEnabled: e.target.checked })}
+              />
+              Outro card
+            </label>
+            {(branding.introEnabled || branding.outroEnabled) && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                Card duration
+                <input
+                  type="number"
+                  step={0.5}
+                  min={1}
+                  max={10}
+                  value={branding.introDurationSeconds}
+                  onChange={(e) => updateBranding({ introDurationSeconds: parseFloat(e.target.value) || 1 })}
+                  style={{ width: 60 }}
+                />
+                s
+              </label>
+            )}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="checkbox"
+                checked={branding.lowerThirdEnabled}
+                onChange={(e) => updateBranding({ lowerThirdEnabled: e.target.checked })}
+              />
+              Lower-third
+            </label>
+            {branding.lowerThirdEnabled && (
+              <input
+                type="text"
+                placeholder={branding.displayName}
+                value={branding.lowerThirdText}
+                onChange={(e) => updateBranding({ lowerThirdText: e.target.value })}
+                style={{ width: 140 }}
+              />
+            )}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="checkbox"
+                checked={branding.watermarkEnabled}
+                onChange={(e) => updateBranding({ watermarkEnabled: e.target.checked })}
+              />
+              Watermark
+            </label>
+            {branding.watermarkEnabled && (
+              <select
+                value={branding.watermarkCorner}
+                onChange={(e) => updateBranding({ watermarkCorner: e.target.value as WatermarkCorner })}
+                style={{ padding: '4px 6px' }}
+              >
+                {WATERMARK_CORNERS.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          <p style={{ color: '#777', fontSize: 12, marginBottom: 0, marginTop: 8 }}>
+            Watermark and lower-third apply to every export. Intro/outro cards only apply when combining clips into
+            a reel.
+          </p>
+        </div>
+      )}
 
       {recentClips.length > 0 && (
         <div style={{ marginTop: 16 }}>

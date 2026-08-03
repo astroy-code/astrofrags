@@ -1,7 +1,20 @@
+import { app } from 'electron'
 import { spawn } from 'child_process'
+import { mkdir, unlink } from 'fs/promises'
+import { join } from 'path'
+import { randomUUID } from 'crypto'
 import ffmpegPath from './ffmpegBinary'
 import { escapeSubtitlesPath } from './subtitlesPath'
 import { buildReframeFilter, presetBitrate, type ExportPreset } from './exportPresets'
+import {
+  buildWatermarkFilter,
+  buildLowerThirdFilter,
+  renderBrandingCard,
+  LOUDNORM_FILTER,
+  CANONICAL_CARD_RESOLUTION,
+  CANONICAL_FRAME_RATE
+} from './branding'
+import type { BrandingSettings } from './brandingSettings'
 
 interface ClipRange {
   videoPath: string
@@ -37,6 +50,7 @@ export interface ReelOptions {
   musicPath?: string
   muteOriginal?: boolean
   preset?: ExportPreset
+  branding?: BrandingSettings
 }
 
 const DEFAULT_TRANSITION_DURATION = 0.75
@@ -163,14 +177,19 @@ export async function renderReel(clips: ClipRange[], outputPath: string, options
     : buildConcatStage(clips)
 
   const filterParts = [...buildClipSegments(clips, inputIndexByPath), combined.filter]
+  let videoLabel = combined.videoLabel
   let audioLabel = combined.audioLabel
   const args = ['-y']
   for (const path of uniqueVideoPaths) {
     args.push('-i', path)
   }
+  // A single running counter for whatever -i gets added next, since intro/outro cards and
+  // the watermark logo may or may not be present — safer than re-deriving an index from
+  // array lengths at each site.
+  let nextInputIndex = uniqueVideoPaths.length
 
   if (options.musicPath) {
-    const musicInputIndex = uniqueVideoPaths.length
+    const musicInputIndex = nextInputIndex++
     args.push('-i', options.musicPath)
     if (options.muteOriginal) {
       // The reel's own audio output still has to go somewhere — ffmpeg errors on any
@@ -187,14 +206,84 @@ export async function renderReel(clips: ClipRange[], outputPath: string, options
     }
   }
 
-  // Reframe (if any) runs on the fully composed reel, after transitions/concat — one pass
-  // over the finished video rather than reframing each clip separately.
-  let videoLabel = combined.videoLabel
+  const branding = options.branding
+  const tempCardPaths: string[] = []
+  if (branding?.introEnabled || branding?.outroEnabled) {
+    const dir = join(app.getPath('temp'), 'highlight-editor')
+    await mkdir(dir, { recursive: true })
+
+    // Normalize the composed main sequence to the same canonical resolution/frame rate/audio
+    // format the cards render at — concat requires every spliced input to match exactly, and
+    // this way neither the real footage's native resolution nor its frame rate has to be
+    // probed ahead of time (no ffprobe dependency needed).
+    const { width, height } = CANONICAL_CARD_RESOLUTION
+    filterParts.push(
+      `${videoLabel}scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${CANONICAL_FRAME_RATE}[main_v]`
+    )
+    filterParts.push(`${audioLabel}aformat=sample_rates=48000:channel_layouts=stereo[main_a]`)
+    videoLabel = '[main_v]'
+    audioLabel = '[main_a]'
+
+    const concatSegments: string[] = []
+
+    if (branding.introEnabled) {
+      const introPath = join(dir, `${randomUUID()}-intro.mp4`)
+      await renderBrandingCard('intro', branding, introPath)
+      tempCardPaths.push(introPath)
+      const idx = nextInputIndex++
+      args.push('-i', introPath)
+      filterParts.push(`[${idx}:v]setpts=PTS-STARTPTS[introv]`)
+      filterParts.push(`[${idx}:a]asetpts=PTS-STARTPTS[introa]`)
+      concatSegments.push('[introv][introa]')
+    }
+
+    concatSegments.push(`${videoLabel}${audioLabel}`)
+
+    if (branding.outroEnabled) {
+      const outroPath = join(dir, `${randomUUID()}-outro.mp4`)
+      await renderBrandingCard('outro', branding, outroPath)
+      tempCardPaths.push(outroPath)
+      const idx = nextInputIndex++
+      args.push('-i', outroPath)
+      filterParts.push(`[${idx}:v]setpts=PTS-STARTPTS[outrov]`)
+      filterParts.push(`[${idx}:a]asetpts=PTS-STARTPTS[outroa]`)
+      concatSegments.push('[outrov][outroa]')
+    }
+
+    filterParts.push(`${concatSegments.join('')}concat=n=${concatSegments.length}:v=1:a=1[cardedv][cardeda]`)
+    videoLabel = '[cardedv]'
+    audioLabel = '[cardeda]'
+  }
+
+  // Reframe (if any) runs on the fully composed reel, after transitions/concat/cards — one
+  // pass over the finished video rather than reframing each piece separately.
   const preset = options.preset ?? 'original'
   if (preset !== 'original') {
     filterParts.push(buildReframeFilter(preset, videoLabel, '[reframedreel]'))
     videoLabel = '[reframedreel]'
   }
+
+  // Watermark/lower-third run last on the video chain, on top of the fully composed frame,
+  // so they sit correctly at the final canvas's actual dimensions.
+  if (branding?.watermarkEnabled && branding.logoPath) {
+    const logoInputIndex = nextInputIndex++
+    // A still image is a single frame — loop it so it's available for the reel's whole
+    // duration instead of vanishing after the overlay filter's first output frame.
+    args.push('-loop', '1', '-i', branding.logoPath)
+    filterParts.push(buildWatermarkFilter(logoInputIndex, branding.watermarkCorner, videoLabel, '[watermarked]'))
+    videoLabel = '[watermarked]'
+  }
+  if (branding?.lowerThirdEnabled) {
+    const text = branding.lowerThirdText || branding.displayName
+    filterParts.push(buildLowerThirdFilter(text, videoLabel, '[lowerthird]'))
+    videoLabel = '[lowerthird]'
+  }
+
+  // Loudness normalization always runs, unlike the opt-in stages above — there's no real
+  // downside to consistent audio levels, so it isn't a toggle.
+  filterParts.push(`${audioLabel}${LOUDNORM_FILTER}[loudreel]`)
+  audioLabel = '[loudreel]'
 
   const bitrate = presetBitrate(preset)
   args.push(
@@ -215,18 +304,24 @@ export async function renderReel(clips: ClipRange[], outputPath: string, options
   }
   args.push('-c:a', 'aac', outputPath)
 
-  await new Promise<void>((resolve, reject) => {
-    const proc = spawn(ffmpegPath as string, args)
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn(ffmpegPath as string, args)
 
-    let stderr = ''
-    proc.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()))
-    proc.on('error', reject)
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-2000)}`))
-        return
-      }
-      resolve()
+      let stderr = ''
+      proc.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()))
+      proc.on('error', reject)
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-2000)}`))
+          return
+        }
+        resolve()
+      })
     })
-  })
+  } finally {
+    for (const cardPath of tempCardPaths) {
+      unlink(cardPath).catch(() => {})
+    }
+  }
 }

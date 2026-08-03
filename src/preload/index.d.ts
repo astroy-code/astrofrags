@@ -50,6 +50,19 @@ interface UpdateStatus {
   message?: string
 }
 
+interface BrandingSettings {
+  displayName: string
+  logoPath: string | null
+  accentColor: string
+  introEnabled: boolean
+  outroEnabled: boolean
+  introDurationSeconds: number
+  lowerThirdEnabled: boolean
+  lowerThirdText: string
+  watermarkEnabled: boolean
+  watermarkCorner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+}
+
 declare global {
   interface Window {
     api: {
@@ -62,6 +75,9 @@ declare global {
       onNewClip: (callback: (filePath: string, createdAtMs: number) => void) => () => void
       onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void
       installUpdate: () => Promise<void>
+      selectLogo: () => Promise<string | null>
+      getBrandingSettings: () => Promise<BrandingSettings>
+      saveBrandingSettings: (settings: BrandingSettings) => Promise<void>
       analyzeVideo: (videoPath: string) => Promise<AnalyzeResult>
       previewCaptions: (videoPath: string, start: number, end: number) => Promise<CaptionLine[]>
       detectVisualEvents: (videoPath: string, region: VisualRegion) => Promise<Peak[]>

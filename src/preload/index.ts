@@ -5,6 +5,7 @@ import type { VisualRegion, VisualPeak } from '../main/visualDetection'
 import type { TransitionStyle } from '../main/exportReel'
 import type { ExportPreset } from '../main/exportPresets'
 import type { UpdateStatus } from '../main/autoUpdate'
+import type { BrandingSettings } from '../main/brandingSettings'
 
 interface AnalyzeResult {
   wav: Uint8Array
@@ -37,6 +38,10 @@ const api = {
     return () => ipcRenderer.removeListener('update:status', listener)
   },
   installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install'),
+  selectLogo: (): Promise<string | null> => ipcRenderer.invoke('dialog:selectLogo'),
+  getBrandingSettings: (): Promise<BrandingSettings> => ipcRenderer.invoke('settings:getBranding'),
+  saveBrandingSettings: (settings: BrandingSettings): Promise<void> =>
+    ipcRenderer.invoke('settings:saveBranding', settings),
   analyzeVideo: (videoPath: string): Promise<AnalyzeResult> =>
     ipcRenderer.invoke('audio:analyze', videoPath),
   previewCaptions: (videoPath: string, start: number, end: number): Promise<CaptionLine[]> =>
