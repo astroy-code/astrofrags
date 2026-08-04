@@ -139,7 +139,6 @@ export default function App(): JSX.Element {
   const wavesurferRef = useRef<WaveSurfer | null>(null)
   const regionsRef = useRef<RegionsPluginInstance | null>(null)
   const clipRegionsRef = useRef<Map<number, RegionInstance>>(new Map())
-  const peakItemRefs = useRef<Map<number, HTMLLIElement>>(new Map())
   const videoRef = useRef<HTMLVideoElement>(null)
   const nextPeakIdRef = useRef(0)
   const visualMarkerRegionsRef = useRef<RegionInstance[]>([])
@@ -195,14 +194,6 @@ export default function App(): JSX.Element {
   useEffect(() => {
     clipsRef.current = clips
   }, [clips])
-
-  // The detected-peaks list can be long enough to scroll — without this, the highlighted
-  // entry for whichever clip is selected can end up off-screen, making it impossible to tell
-  // which peak a selected clip corresponds to.
-  useEffect(() => {
-    if (activeClipId === null) return
-    peakItemRefs.current.get(activeClipId)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [activeClipId])
 
   useEffect(() => {
     window.api.getSessionHistory().then(setSessionHistory)
@@ -1509,6 +1500,7 @@ export default function App(): JSX.Element {
               style={{ width: '100%', maxHeight: 300, background: '#000', marginBottom: 16 }}
             />
           )}
+          <div style={{ maxHeight: 500, overflowY: 'auto' }}>
           {clips.map((clip, index) => (
             <div
               key={clip.id}
@@ -1661,6 +1653,7 @@ export default function App(): JSX.Element {
             )}
             </div>
           ))}
+          </div>
         </div>
       )}
 
@@ -1680,13 +1673,7 @@ export default function App(): JSX.Element {
             {peaks.map((peak) => {
               const added = clips.some((c) => c.id === peak.id)
               return (
-                <li
-                  key={peak.id}
-                  ref={(el) => {
-                    if (el) peakItemRefs.current.set(peak.id, el)
-                    else peakItemRefs.current.delete(peak.id)
-                  }}
-                >
+                <li key={peak.id}>
                   <button
                     onClick={() => addOrFocusClip(peak)}
                     style={{
