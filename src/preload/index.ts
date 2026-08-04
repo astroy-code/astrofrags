@@ -6,6 +6,7 @@ import type { TransitionStyle } from '../main/exportReel'
 import type { ExportPreset } from '../main/exportPresets'
 import type { UpdateStatus } from '../main/autoUpdate'
 import type { BrandingSettings } from '../main/brandingSettings'
+import type { SessionSnapshot } from '../main/sessionHistory'
 
 interface AnalyzeResult {
   wav: Uint8Array
@@ -41,6 +42,11 @@ const api = {
   getBrandingSettings: (): Promise<BrandingSettings> => ipcRenderer.invoke('settings:getBranding'),
   saveBrandingSettings: (settings: BrandingSettings): Promise<void> =>
     ipcRenderer.invoke('settings:saveBranding', settings),
+  getSessionHistory: (): Promise<SessionSnapshot[]> => ipcRenderer.invoke('settings:getSessionHistory'),
+  saveSessionSnapshot: (snapshot: SessionSnapshot): Promise<SessionSnapshot[]> =>
+    ipcRenderer.invoke('settings:saveSessionSnapshot', snapshot),
+  deleteSessionSnapshot: (id: string): Promise<SessionSnapshot[]> =>
+    ipcRenderer.invoke('settings:deleteSessionSnapshot', id),
   analyzeVideo: (videoPath: string): Promise<AnalyzeResult> =>
     ipcRenderer.invoke('audio:analyze', videoPath),
   previewCaptions: (videoPath: string, start: number, end: number): Promise<CaptionLine[]> =>

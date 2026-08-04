@@ -1,6 +1,6 @@
 {
   "name": "astrofrags",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Astrofrags — local video import, ffmpeg audio/visual highlight detection, and clip/reel editing.",
   "main": "./out/main/index.js",
   "private": true,

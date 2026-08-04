@@ -42,7 +42,7 @@ type TransitionStyle =
   | 'zoomin'
   | 'random'
 
-type ExportPreset = 'original' | 'vertical' | 'square'
+type ExportPreset = 'original' | 'vertical' | 'vertical-crop' | 'square'
 
 interface UpdateStatus {
   state: 'available' | 'downloaded' | 'error'
@@ -61,6 +61,29 @@ interface BrandingSettings {
   watermarkCorner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 }
 
+interface SessionClipSnapshot {
+  id: number
+  sourceVideoPath: string
+  start: number
+  end: number
+  captions: boolean
+}
+
+interface SessionSnapshot {
+  id: string
+  savedAt: number
+  videoPath: string
+  videoPaths: string[]
+  clips: SessionClipSnapshot[]
+  transitionsEnabled: boolean
+  transitionStyle: TransitionStyle
+  transitionDuration: number
+  musicPath: string | null
+  muteOriginal: boolean
+  exportPreset: ExportPreset
+  branding: BrandingSettings
+}
+
 declare global {
   interface Window {
     api: {
@@ -75,6 +98,9 @@ declare global {
       installUpdate: () => Promise<void>
       getBrandingSettings: () => Promise<BrandingSettings>
       saveBrandingSettings: (settings: BrandingSettings) => Promise<void>
+      getSessionHistory: () => Promise<SessionSnapshot[]>
+      saveSessionSnapshot: (snapshot: SessionSnapshot) => Promise<SessionSnapshot[]>
+      deleteSessionSnapshot: (id: string) => Promise<SessionSnapshot[]>
       analyzeVideo: (videoPath: string) => Promise<AnalyzeResult>
       previewCaptions: (videoPath: string, start: number, end: number) => Promise<CaptionLine[]>
       detectVisualEvents: (videoPath: string, region: VisualRegion) => Promise<Peak[]>

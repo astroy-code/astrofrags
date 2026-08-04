@@ -14,6 +14,12 @@ import { detectVisualActivity, type VisualRegion } from './visualDetection'
 import { startWatchingFolder, stopWatchingFolder } from './watchFolder'
 import { initAutoUpdater, installUpdateAndRestart } from './autoUpdate'
 import { loadBrandingSettings, saveBrandingSettings, type BrandingSettings } from './brandingSettings'
+import {
+  loadSessionHistory,
+  saveSessionSnapshot,
+  deleteSessionSnapshot,
+  type SessionSnapshot
+} from './sessionHistory'
 
 let lastPreviewPath: string | null = null
 let lastReelPreviewPath: string | null = null
@@ -113,6 +119,12 @@ ipcMain.handle('dialog:selectFolder', async () => {
 ipcMain.handle('settings:getBranding', () => loadBrandingSettings())
 
 ipcMain.handle('settings:saveBranding', (_event, settings: BrandingSettings) => saveBrandingSettings(settings))
+
+ipcMain.handle('settings:getSessionHistory', () => loadSessionHistory())
+
+ipcMain.handle('settings:saveSessionSnapshot', (_event, snapshot: SessionSnapshot) => saveSessionSnapshot(snapshot))
+
+ipcMain.handle('settings:deleteSessionSnapshot', (_event, id: string) => deleteSessionSnapshot(id))
 
 ipcMain.handle('watch:start', (_event, folder: string) => {
   startWatchingFolder(folder, (filePath, createdAtMs) => {

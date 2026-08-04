@@ -52,7 +52,8 @@ interface BrandingSettings {
 
 const EXPORT_PRESETS = [
   { value: 'original', label: 'Original (16:9)' },
-  { value: 'vertical', label: 'Vertical — TikTok/Shorts/Reels (9:16)' },
+  { value: 'vertical', label: 'Vertical — blurred bars (9:16)' },
+  { value: 'vertical-crop', label: 'Vertical — cropped, no bars (9:16)' },
   { value: 'square', label: 'Square (1:1)' }
 ] as const
 type ExportPreset = (typeof EXPORT_PRESETS)[number]['value']
@@ -87,6 +88,29 @@ interface ClipItem {
   captionPreviewError: string | null
 }
 
+interface SessionClipSnapshot {
+  id: number
+  sourceVideoPath: string
+  start: number
+  end: number
+  captions: boolean
+}
+
+interface SessionSnapshot {
+  id: string
+  savedAt: number
+  videoPath: string
+  videoPaths: string[]
+  clips: SessionClipSnapshot[]
+  transitionsEnabled: boolean
+  transitionStyle: TransitionStyle
+  transitionDuration: number
+  musicPath: string | null
+  muteOriginal: boolean
+  exportPreset: ExportPreset
+  branding: BrandingSettings
+}
+
 type RegionsPluginInstance = ReturnType<typeof RegionsPlugin.create>
 type RegionInstance = ReturnType<RegionsPluginInstance['addRegion']>
 
@@ -118,6 +142,13 @@ export default function App(): JSX.Element {
   const isProgrammaticRegionRef = useRef(false)
   const waveformWrapperRef = useRef<HTMLDivElement>(null)
   const manualDragStartXRef = useRef<number | null>(null)
+  // loadVideo needs the *current* clips to rebuild that video's own regions, but it reads
+  // them well after an await (a real IPC round-trip), by which point a same-tick setClips
+  // call (e.g. session restore) would otherwise be invisible to its stale closure — this
+  // ref stays current across that gap since the sync effect below runs before the await
+  // resolves.
+  const clipsRef = useRef<ClipItem[]>([])
+  const currentSessionIdRef = useRef<string | null>(null)
 
   const [videoPath, setVideoPath] = useState<string | null>(null)
   const [manualClipMode, setManualClipMode] = useState(false)
@@ -155,6 +186,15 @@ export default function App(): JSX.Element {
   )
   const [watchFolder, setWatchFolder] = useState<string | null>(null)
   const [recentClips, setRecentClips] = useState<{ path: string; createdAtMs: number }[]>([])
+  const [sessionHistory, setSessionHistory] = useState<SessionSnapshot[]>([])
+
+  useEffect(() => {
+    clipsRef.current = clips
+  }, [clips])
+
+  useEffect(() => {
+    window.api.getSessionHistory().then(setSessionHistory)
+  }, [])
 
   useEffect(() => {
     if (!waveformRef.current) return
@@ -373,6 +413,7 @@ export default function App(): JSX.Element {
       setReelPath(null)
       setReelStatus('idle')
       setReelError(null)
+      currentSessionIdRef.current = null
     }
   }
 
@@ -544,7 +585,7 @@ export default function App(): JSX.Element {
           .map((peak) => ({ ...peak, id: nextPeakIdRef.current++, source: 'audio' as const }))
         sorted.forEach(addPeakMarker)
         setPeaks(sorted)
-        clips.filter((c) => c.sourceVideoPath === path).forEach(addClipRegion)
+        clipsRef.current.filter((c) => c.sourceVideoPath === path).forEach(addClipRegion)
       }
 
       setStatus('ready')
@@ -614,6 +655,87 @@ export default function App(): JSX.Element {
     })
   }
 
+  // Auto-saves the in-progress working session (video, clips, order, transitions, music,
+  // export format, branding) so it can be resumed after the app closes — debounced so
+  // rapid edits (dragging a trim handle) don't spam disk writes. currentSessionIdRef keeps
+  // this upserting into the same history entry until the clip list is emptied (removeClip
+  // resets it to null there), at which point the next clip added starts a fresh entry.
+  useEffect(() => {
+    if (clips.length === 0 || !videoPath || !branding) return
+
+    const timer = setTimeout(() => {
+      if (!currentSessionIdRef.current) currentSessionIdRef.current = crypto.randomUUID()
+      const videoPaths = Array.from(new Set(clips.map((c) => c.sourceVideoPath)))
+      const snapshot: SessionSnapshot = {
+        id: currentSessionIdRef.current,
+        savedAt: Date.now(),
+        videoPath,
+        videoPaths,
+        clips: clips.map((c) => ({
+          id: c.id,
+          sourceVideoPath: c.sourceVideoPath,
+          start: c.start,
+          end: c.end,
+          captions: c.captions
+        })),
+        transitionsEnabled,
+        transitionStyle,
+        transitionDuration,
+        musicPath,
+        muteOriginal,
+        exportPreset,
+        branding
+      }
+      window.api.saveSessionSnapshot(snapshot).then(setSessionHistory)
+    }, 1000)
+
+    return () => clearTimeout(timer)
+  }, [
+    clips,
+    transitionsEnabled,
+    transitionStyle,
+    transitionDuration,
+    musicPath,
+    muteOriginal,
+    exportPreset,
+    videoPath,
+    branding
+  ])
+
+  async function handleRestoreSession(snapshot: SessionSnapshot): Promise<void> {
+    setActiveClipId(null)
+    setTransitionsEnabled(snapshot.transitionsEnabled)
+    setTransitionStyle(snapshot.transitionStyle)
+    setTransitionDuration(snapshot.transitionDuration)
+    setMusicPath(snapshot.musicPath)
+    setMuteOriginal(snapshot.muteOriginal)
+    setExportPreset(snapshot.exportPreset)
+
+    await window.api.saveBrandingSettings(snapshot.branding)
+    setBranding(snapshot.branding)
+
+    const restoredClips: ClipItem[] = snapshot.clips.map((c) => ({
+      ...c,
+      exportStatus: 'idle',
+      exportedPath: null,
+      exportError: null,
+      captionsAdded: false,
+      captionPreview: null,
+      captionPreviewStatus: 'idle',
+      captionPreviewError: null
+    }))
+    nextPeakIdRef.current = Math.max(nextPeakIdRef.current, ...restoredClips.map((c) => c.id + 1), 0)
+    setClips(restoredClips)
+    // Restoring continues editing this same history entry rather than forking a new one —
+    // the auto-save effect above will keep it up to date as edits continue.
+    currentSessionIdRef.current = snapshot.id
+
+    await loadVideo(snapshot.videoPath)
+  }
+
+  async function handleDeleteSession(id: string): Promise<void> {
+    setSessionHistory(await window.api.deleteSessionSnapshot(id))
+  }
 
   async function handlePreviewCaptions(id: number): Promise<void> {
     const clip = clips.find((c) => c.id === id)
@@ -844,6 +966,55 @@ export default function App(): JSX.Element {
           </select>
         </label>
       </div>
+
+      {sessionHistory.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <h3>Recent sessions ({sessionHistory.length})</h3>
+          <ul style={{ listStyle: 'none', padding: 0, maxHeight: 200, overflowY: 'auto' }}>
+            {sessionHistory.map((session) => (
+              <li key={session.id} style={{ display: 'flex', gap: 6, marginBottom: 2, alignItems: 'stretch' }}>
+                <button
+                  onClick={() => handleRestoreSession(session)}
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    gap: 12,
+                    alignItems: 'baseline',
+                    textAlign: 'left',
+                    padding: '4px 8px',
+                    background: currentSessionIdRef.current === session.id ? '#2f5fce' : '#2a2a2a',
+                    color: '#eee',
+                    border: '1px solid #444',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <span style={{ color: '#999', fontSize: 12, flexShrink: 0 }}>
+                    {new Date(session.savedAt).toLocaleString()}
+                  </span>
+                  <span>{basename(session.videoPath)}</span>
+                  <span style={{ color: '#999', fontSize: 12 }}>
+                    {session.clips.length} clip{session.clips.length === 1 ? '' : 's'}
+                    {session.videoPaths.length > 1 ? ` across ${session.videoPaths.length} videos` : ''}
+                  </span>
+                </button>
+                <button
+                  onClick={() => handleDeleteSession(session.id)}
+                  title="Remove from history"
+                  style={{
+                    padding: '4px 10px',
+                    background: '#2a2a2a',
+                    color: '#999',
+                    border: '1px solid #444',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {branding && (
         <div style={{ marginTop: 12, padding: 12, border: '1px solid #444', borderRadius: 4 }}>

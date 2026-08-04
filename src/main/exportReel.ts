@@ -56,6 +56,7 @@ export interface ReelOptions {
 
 const DEFAULT_TRANSITION_DURATION = 0.75
 const MAX_TRANSITION_DURATION = 2
+const MUSIC_FADE_SECONDS = 2
 
 interface CombinedStage {
   filter: string
@@ -121,37 +122,50 @@ function buildCrossfadeStage(clips: ClipRange[], style: TransitionStyle, request
   return { filter: stages.join('; '), videoLabel: `[${vLabel}]`, audioLabel: `[${aLabel}]`, totalDuration: cumulativeDuration }
 }
 
+// Clamped the same way transition duration is (Math.min against half the total length) so a
+// short reel doesn't ask for a fade longer than the music itself has room for.
+function musicFadeDuration(totalDuration: number): number {
+  return Math.min(MUSIC_FADE_SECONDS, totalDuration / 2)
+}
+
 /** Loops the music track (however short) to cover the reel, attenuates it as a background
- * bed, then ducks it under the reel's own audio via sidechain compression so it quiets
- * automatically under speech/game sound instead of fighting with it at a constant volume.
- * A filter link label can only feed one filter input, but the reel's own audio is needed
- * twice here (once as the sidechain trigger, once in the final mix) — asplit makes the
- * two independent copies that requires. */
+ * bed, fades it in/out at the ends so it doesn't start/stop abruptly, then ducks it under
+ * the reel's own audio via sidechain compression so it quiets automatically under
+ * speech/game sound instead of fighting with it at a constant volume. A filter link label
+ * can only feed one filter input, but the reel's own audio is needed twice here (once as
+ * the sidechain trigger, once in the final mix) — asplit makes the two independent copies
+ * that requires. */
 function buildMusicStage(
   audioLabel: string,
   totalDuration: number,
   musicInputIndex: number
 ): { filter: string; audioLabel: string } {
+  const fadeDuration = musicFadeDuration(totalDuration)
+  const fadeOutStart = Math.max(totalDuration - fadeDuration, 0)
   const filter = [
     `${audioLabel}asplit=2[dry][sidechain]`,
     `[${musicInputIndex}:a]aformat=sample_rates=48000:channel_layouts=stereo,aloop=loop=-1:size=2e9,` +
-      `atrim=0:${totalDuration},asetpts=PTS-STARTPTS,volume=0.35[music]`,
+      `atrim=0:${totalDuration},asetpts=PTS-STARTPTS,volume=0.35,` +
+      `afade=t=in:st=0:d=${fadeDuration},afade=t=out:st=${fadeOutStart}:d=${fadeDuration}[music]`,
     `[music][sidechain]sidechaincompress=threshold=0.05:ratio=8:attack=5:release=300[duckedmusic]`,
     `[dry][duckedmusic]amix=inputs=2:duration=first[finalaudio]`
   ].join('; ')
   return { filter, audioLabel: '[finalaudio]' }
 }
 
-/** Same music loop/trim as buildMusicStage, but replaces the reel's own audio outright
+/** Same music loop/trim/fade as buildMusicStage, but replaces the reel's own audio outright
  * instead of ducking under it — video is unaffected, and burned-in captions still work
  * since those live on the video stream, independent of which audio track plays. */
 function buildMusicOnlyStage(
   totalDuration: number,
   musicInputIndex: number
 ): { filter: string; audioLabel: string } {
+  const fadeDuration = musicFadeDuration(totalDuration)
+  const fadeOutStart = Math.max(totalDuration - fadeDuration, 0)
   const filter =
     `[${musicInputIndex}:a]aformat=sample_rates=48000:channel_layouts=stereo,aloop=loop=-1:size=2e9,` +
-    `atrim=0:${totalDuration},asetpts=PTS-STARTPTS[finalaudio]`
+    `atrim=0:${totalDuration},asetpts=PTS-STARTPTS,` +
+    `afade=t=in:st=0:d=${fadeDuration},afade=t=out:st=${fadeOutStart}:d=${fadeDuration}[finalaudio]`
   return { filter, audioLabel: '[finalaudio]' }
 }
 

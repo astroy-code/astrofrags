@@ -1,4 +1,4 @@
-export const EXPORT_PRESETS = ['original', 'vertical', 'square'] as const
+export const EXPORT_PRESETS = ['original', 'vertical', 'vertical-crop', 'square'] as const
 export type ExportPreset = (typeof EXPORT_PRESETS)[number]
 
 interface PresetSpec {
@@ -11,6 +11,7 @@ interface PresetSpec {
 // much more quality in their own compression pass.
 const PRESET_SPECS: Record<Exclude<ExportPreset, 'original'>, PresetSpec> = {
   vertical: { width: 1080, height: 1920, bitrate: '10M' },
+  'vertical-crop': { width: 1080, height: 1920, bitrate: '10M' },
   square: { width: 1080, height: 1080, bitrate: '8M' }
 }
 
@@ -27,13 +28,21 @@ export function presetBitrate(preset: ExportPreset): string | null {
 /** Fits widescreen gameplay into a taller/squarer canvas without cropping any of the actual
  * footage: a heavily blurred, cropped-to-fill copy of the source sits behind a sharp copy
  * that's scaled down to fit entirely within the canvas, centered. This is the standard
- * "TikTok-style" reframe for turning 16:9 video into vertical/square short-form video. */
+ * "TikTok-style" reframe for turning 16:9 video into vertical/square short-form video.
+ * `vertical-crop` instead fills the canvas outright — scales up until the shorter dimension
+ * matches, then crops the excess off both sides, centered — trading the cropped-off
+ * left/right edges for no blur bars at all. */
 export function buildReframeFilter(preset: ExportPreset, inLabel: string, outLabel: string): string {
   const dims = presetDimensions(preset)
   if (!dims) {
     throw new Error(`buildReframeFilter called with preset '${preset}', which has no target dimensions`)
   }
   const { width, height } = dims
+
+  if (preset === 'vertical-crop') {
+    return `${inLabel}scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}${outLabel}`
+  }
+
   return (
     `${inLabel}split=2[reframe_bg_in][reframe_fg_in];` +
     `[reframe_bg_in]scale=${width}:${height}:force_original_aspect_ratio=increase,` +
