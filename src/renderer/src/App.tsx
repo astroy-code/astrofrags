@@ -116,6 +116,9 @@ type RegionInstance = ReturnType<RegionsPluginInstance['addRegion']>
 
 const CLIP_PAD_BEFORE = 5
 const CLIP_PAD_AFTER = 3
+const SHORTS_DURATION_CAP_SECONDS = 180
+const MIN_CLIP_DURATION_SECONDS = 1.5
+const AUTO_BUILD_CLIP_COUNT = 8
 
 function toFileUrl(path: string): string {
   return `file:///${encodeURI(path.replace(/\\/g, '/'))}`
@@ -136,6 +139,7 @@ export default function App(): JSX.Element {
   const wavesurferRef = useRef<WaveSurfer | null>(null)
   const regionsRef = useRef<RegionsPluginInstance | null>(null)
   const clipRegionsRef = useRef<Map<number, RegionInstance>>(new Map())
+  const peakItemRefs = useRef<Map<number, HTMLLIElement>>(new Map())
   const videoRef = useRef<HTMLVideoElement>(null)
   const nextPeakIdRef = useRef(0)
   const visualMarkerRegionsRef = useRef<RegionInstance[]>([])
@@ -191,6 +195,14 @@ export default function App(): JSX.Element {
   useEffect(() => {
     clipsRef.current = clips
   }, [clips])
+
+  // The detected-peaks list can be long enough to scroll — without this, the highlighted
+  // entry for whichever clip is selected can end up off-screen, making it impossible to tell
+  // which peak a selected clip corresponds to.
+  useEffect(() => {
+    if (activeClipId === null) return
+    peakItemRefs.current.get(activeClipId)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [activeClipId])
 
   useEffect(() => {
     window.api.getSessionHistory().then(setSessionHistory)
@@ -547,6 +559,88 @@ export default function App(): JSX.Element {
     })
   }
 
+  function autoFitClipsToShortsCap(): void {
+    const totalDuration = clips.reduce((sum, c) => sum + (c.end - c.start), 0)
+    if (totalDuration <= 0) return
+    const ratio = SHORTS_DURATION_CAP_SECONDS / totalDuration
+    clips.forEach((c) => {
+      const duration = c.end - c.start
+      const newDuration = Math.max(MIN_CLIP_DURATION_SECONDS, duration * ratio)
+      const shrink = duration - newDuration
+      // Shrinks symmetrically around the clip's center so the padded highlight moment
+      // stays roughly centered rather than getting trimmed away from one side only.
+      updateClip(c.id, { start: c.start + shrink / 2, end: c.end - shrink / 2 })
+    })
+  }
+
+  // Builds a reel in one click from the loaded video's detected peaks, instead of clicking
+  // each one individually: takes the highest-scoring peaks not already added, orders them
+  // chronologically (matching the "appended in time order" convention manual peak-clicks
+  // already follow), and — if the current export format is a Shorts-style vertical preset —
+  // shrinks them inline to fit the 3-minute cap so the result is ready to preview/export
+  // without a second manual "Fit to 3:00" click.
+  function autoBuildReel(): void {
+    if (!videoPath) return
+    const duration = wavesurferRef.current?.getDuration() ?? 0
+
+    const rangeFor = (peak: DisplayPeak): { start: number; end: number } => ({
+      start: Math.max(0, peak.time - CLIP_PAD_BEFORE),
+      end: duration > 0 ? Math.min(duration, peak.time + CLIP_PAD_AFTER) : peak.time + CLIP_PAD_AFTER
+    })
+    const overlaps = (a: { start: number; end: number }, b: { start: number; end: number }): boolean =>
+      a.start < b.end && b.start < a.end
+
+    // Existing clips from this same video count as already-claimed footage too — auto-build
+    // shouldn't hand you a clip that replays a moment you (or an earlier auto-build click)
+    // already added.
+    const existingRanges = clips
+      .filter((c) => c.sourceVideoPath === videoPath)
+      .map((c) => ({ start: c.start, end: c.end }))
+
+    // Greedily walk peaks best-score-first, skipping any whose padded range overlaps an
+    // already-chosen one (existing or newly picked), until enough non-overlapping clips are
+    // found or peaks run out.
+    const chosen: { id: number; time: number; start: number; end: number }[] = []
+    for (const peak of [...peaks].filter((p) => !clips.some((c) => c.id === p.id)).sort((a, b) => b.score - a.score)) {
+      if (chosen.length >= AUTO_BUILD_CLIP_COUNT) break
+      const range = rangeFor(peak)
+      if ([...existingRanges, ...chosen].some((r) => overlaps(r, range))) continue
+      chosen.push({ id: peak.id, time: peak.time, ...range })
+    }
+    if (chosen.length === 0) return
+
+    // Appended in chronological order, same convention as manual peak-clicks.
+    chosen.sort((a, b) => a.time - b.time)
+
+    const isShorts = exportPreset === 'vertical' || exportPreset === 'vertical-crop'
+    const newClipsDuration = chosen.reduce((sum, r) => sum + (r.end - r.start), 0)
+    const shouldFit = isShorts && newClipsDuration > SHORTS_DURATION_CAP_SECONDS
+    const ratio = shouldFit ? SHORTS_DURATION_CAP_SECONDS / newClipsDuration : 1
+
+    const newClips: ClipItem[] = chosen.map(({ id, start, end }) => {
+      const clipDuration = end - start
+      const fittedDuration = shouldFit ? Math.max(MIN_CLIP_DURATION_SECONDS, clipDuration * ratio) : clipDuration
+      const shrink = clipDuration - fittedDuration
+      return {
+        id,
+        sourceVideoPath: videoPath,
+        start: start + shrink / 2,
+        end: end - shrink / 2,
+        captions: false,
+        exportStatus: 'idle',
+        exportedPath: null,
+        exportError: null,
+        captionsAdded: false,
+        captionPreview: null,
+        captionPreviewStatus: 'idle',
+        captionPreviewError: null
+      }
+    })
+
+    setClips((prev) => [...prev, ...newClips])
+    newClips.forEach(addClipRegion)
+  }
+
   async function loadVideo(path: string): Promise<void> {
     setVideoPath(path)
     setPreviewPath(null)
@@ -894,6 +988,8 @@ export default function App(): JSX.Element {
   }
 
   const activeClip = clips.find((c) => c.id === activeClipId) ?? null
+  const isShortsPreset = exportPreset === 'vertical' || exportPreset === 'vertical-crop'
+  const totalClipsDuration = clips.reduce((sum, c) => sum + (c.end - c.start), 0)
 
   return (
     <div
@@ -1294,6 +1390,24 @@ export default function App(): JSX.Element {
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <h3 style={{ margin: 0 }}>Selected clips ({clips.length})</h3>
+            <span
+              style={{
+                color: isShortsPreset && totalClipsDuration > SHORTS_DURATION_CAP_SECONDS ? '#ff6b6b' : '#999',
+                fontSize: 12
+              }}
+            >
+              Total: {formatTime(totalClipsDuration)}
+              {isShortsPreset ? ' / 3:00 for Shorts' : ''}
+            </span>
+            {isShortsPreset && totalClipsDuration > SHORTS_DURATION_CAP_SECONDS && (
+              <button
+                onClick={autoFitClipsToShortsCap}
+                title="Proportionally shorten every clip so the reel fits under 3 minutes"
+                style={{ padding: '4px 10px', cursor: 'pointer' }}
+              >
+                Fit to 3:00
+              </button>
+            )}
             <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <input
                 type="checkbox"
@@ -1552,12 +1666,27 @@ export default function App(): JSX.Element {
 
       {peaks.length > 0 && (
         <div>
-          <h3>Detected peaks ({peaks.length})</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <h3 style={{ margin: 0 }}>Detected peaks ({peaks.length})</h3>
+            <button
+              onClick={autoBuildReel}
+              title={`Add up to ${AUTO_BUILD_CLIP_COUNT} highest-scoring, non-overlapping detected peaks as clips in one click`}
+              style={{ padding: '4px 10px', cursor: 'pointer' }}
+            >
+              Auto-build reel (top {AUTO_BUILD_CLIP_COUNT})
+            </button>
+          </div>
           <ul style={{ listStyle: 'none', padding: 0, maxHeight: 300, overflowY: 'auto' }}>
             {peaks.map((peak) => {
               const added = clips.some((c) => c.id === peak.id)
               return (
-                <li key={peak.id}>
+                <li
+                  key={peak.id}
+                  ref={(el) => {
+                    if (el) peakItemRefs.current.set(peak.id, el)
+                    else peakItemRefs.current.delete(peak.id)
+                  }}
+                >
                   <button
                     onClick={() => addOrFocusClip(peak)}
                     style={{
@@ -1568,7 +1697,8 @@ export default function App(): JSX.Element {
                       marginBottom: 2,
                       background: activeClipId === peak.id ? '#2f5fce' : added ? '#1e3a24' : '#2a2a2a',
                       color: '#eee',
-                      border: '1px solid #444',
+                      border: activeClipId === peak.id ? '1px solid #8fb4ff' : '1px solid #444',
+                      boxShadow: activeClipId === peak.id ? '0 0 0 1px #8fb4ff' : 'none',
                       cursor: 'pointer'
                     }}
                   >
