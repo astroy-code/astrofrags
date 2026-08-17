@@ -191,6 +191,11 @@ export default function App(): JSX.Element {
   )
   const [watchFolder, setWatchFolder] = useState<string | null>(null)
   const [recentClips, setRecentClips] = useState<{ path: string; createdAtMs: number }[]>([])
+  // These panels are set up once per project rather than checked on every clip, so they
+  // start collapsed to shorten the distance between picking a video and finding a moment.
+  const [sessionsExpanded, setSessionsExpanded] = useState(false)
+  const [brandingExpanded, setBrandingExpanded] = useState(false)
+  const [recentClipsExpanded, setRecentClipsExpanded] = useState(false)
   // Which of the loaded video's audio streams new clips should use (e.g. game audio vs. mic
   // on multi-track recordings) — a per-video choice, reset whenever a different video loads.
   const [audioTrackCount, setAudioTrackCount] = useState(1)
@@ -1097,7 +1102,60 @@ export default function App(): JSX.Element {
         </label>
       </div>
 
-      {sessionHistory.length > 0 && (
+      {(sessionHistory.length > 0 || branding || recentClips.length > 0) && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+          {sessionHistory.length > 0 && (
+            <button
+              onClick={() => setSessionsExpanded((prev) => !prev)}
+              style={{
+                fontSize: 12,
+                padding: '4px 10px',
+                borderRadius: 999,
+                border: '1px solid #444',
+                background: '#202020',
+                color: '#b7b7b7',
+                cursor: 'pointer'
+              }}
+            >
+              {sessionsExpanded ? '▾' : '▸'} Recent sessions ({sessionHistory.length})
+            </button>
+          )}
+          {branding && (
+            <button
+              onClick={() => setBrandingExpanded((prev) => !prev)}
+              style={{
+                fontSize: 12,
+                padding: '4px 10px',
+                borderRadius: 999,
+                border: '1px solid #444',
+                background: '#202020',
+                color: '#b7b7b7',
+                cursor: 'pointer'
+              }}
+            >
+              {brandingExpanded ? '▾' : '▸'} Branding
+            </button>
+          )}
+          {recentClips.length > 0 && (
+            <button
+              onClick={() => setRecentClipsExpanded((prev) => !prev)}
+              style={{
+                fontSize: 12,
+                padding: '4px 10px',
+                borderRadius: 999,
+                border: '1px solid #444',
+                background: '#202020',
+                color: '#b7b7b7',
+                cursor: 'pointer'
+              }}
+            >
+              {recentClipsExpanded ? '▾' : '▸'} Recent clips ({recentClips.length})
+            </button>
+          )}
+        </div>
+      )}
+
+      {sessionHistory.length > 0 && sessionsExpanded && (
         <div style={{ marginTop: 16 }}>
           <h3>Recent sessions ({sessionHistory.length})</h3>
           <ul style={{ listStyle: 'none', padding: 0, maxHeight: 200, overflowY: 'auto' }}>
@@ -1146,7 +1204,7 @@ export default function App(): JSX.Element {
         </div>
       )}
 
-      {branding && (
+      {branding && brandingExpanded && (
         <div style={{ marginTop: 12, padding: 12, border: '1px solid #444', borderRadius: 4 }}>
           <h3 style={{ marginTop: 0 }}>Branding</h3>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 8 }}>
@@ -1240,7 +1298,7 @@ export default function App(): JSX.Element {
         </div>
       )}
 
-      {recentClips.length > 0 && (
+      {recentClips.length > 0 && recentClipsExpanded && (
         <div style={{ marginTop: 16 }}>
           <h3>Recent clips ({recentClips.length})</h3>
           <ul style={{ listStyle: 'none', padding: 0, maxHeight: 200, overflowY: 'auto' }}>
@@ -1273,7 +1331,18 @@ export default function App(): JSX.Element {
         </div>
       )}
 
-      {videoPath && <p style={{ color: '#777', fontSize: 12 }}>{videoPath}</p>}
+      <style>{`
+        @media (max-width: 1000px) {
+          .af-two-col { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
+      <div
+        className="af-two-col"
+        style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 24, alignItems: 'start', marginTop: 16 }}
+      >
+        <div style={{ gridColumn: 1, order: 1 }}>
+          <h3 style={{ marginTop: 0 }}>Find a moment</h3>
+          {videoPath && <p style={{ color: '#777', fontSize: 12 }}>{videoPath}</p>}
       {status === 'analyzing' && <p>Analyzing audio…</p>}
       {status === 'error' && <p style={{ color: '#ff6b6b' }}>Error: {error}</p>}
 
@@ -1452,9 +1521,11 @@ export default function App(): JSX.Element {
           />
         )}
       </div>
+        </div>
 
       {clips.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 16, gridColumn: 2, order: 2 }}>
+          <h3 style={{ marginTop: 0 }}>Build the reel</h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <h3 style={{ margin: 0 }}>Selected clips ({clips.length})</h3>
             <span
@@ -1734,7 +1805,7 @@ export default function App(): JSX.Element {
       )}
 
       {peaks.length > 0 && (
-        <div>
+        <div style={{ gridColumn: 1, order: 3 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <h3 style={{ margin: 0 }}>Detected peaks ({peaks.length})</h3>
             <button
@@ -1775,6 +1846,7 @@ export default function App(): JSX.Element {
           </ul>
         </div>
       )}
+      </div>
     </div>
   )
 }

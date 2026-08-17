@@ -75,8 +75,10 @@ async function resolveClipsWithSrt(
 
 function createWindow(): void {
   const win = new BrowserWindow({
-    width: 1100,
-    height: 720,
+    width: 1440,
+    height: 860,
+    minWidth: 900,
+    minHeight: 640,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
