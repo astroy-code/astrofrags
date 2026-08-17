@@ -20,9 +20,11 @@ import {
   deleteSessionSnapshot,
   type SessionSnapshot
 } from './sessionHistory'
+import { probeAudioTrackCount, extractAudioTrackPreview } from './audioTracks'
 
 let lastPreviewPath: string | null = null
 let lastReelPreviewPath: string | null = null
+let lastTrackPreviewPath: string | null = null
 
 // Works around a black-video-frame bug on some GPU/driver combos where hardware
 // video decode silently fails (seeking/duration still work, but no frames render).
@@ -51,14 +53,22 @@ async function generateSrtIfRequested(
 }
 
 async function resolveClipsWithSrt(
-  clips: { videoPath: string; start: number; end: number; captions: boolean; captionLines?: CaptionLine[] }[]
-): Promise<{ videoPath: string; start: number; end: number; srtPath?: string }[]> {
+  clips: {
+    videoPath: string
+    start: number
+    end: number
+    captions: boolean
+    captionLines?: CaptionLine[]
+    audioTrackIndex?: number
+  }[]
+): Promise<{ videoPath: string; start: number; end: number; srtPath?: string; audioTrackIndex?: number }[]> {
   return Promise.all(
     clips.map(async (clip) => ({
       videoPath: clip.videoPath,
       start: clip.start,
       end: clip.end,
-      srtPath: await generateSrtIfRequested(clip.videoPath, clip.start, clip.end, clip.captions, clip.captionLines)
+      srtPath: await generateSrtIfRequested(clip.videoPath, clip.start, clip.end, clip.captions, clip.captionLines),
+      audioTrackIndex: clip.audioTrackIndex
     }))
   )
 }
@@ -126,6 +136,20 @@ ipcMain.handle('settings:saveSessionSnapshot', (_event, snapshot: SessionSnapsho
 
 ipcMain.handle('settings:deleteSessionSnapshot', (_event, id: string) => deleteSessionSnapshot(id))
 
+ipcMain.handle('audio:probeTrackCount', (_event, videoPath: string) => probeAudioTrackCount(videoPath))
+
+ipcMain.handle(
+  'audio:previewTrack',
+  async (_event, args: { videoPath: string; trackIndex: number; seekSeconds: number }) => {
+    const outPath = await extractAudioTrackPreview(args.videoPath, args.trackIndex, args.seekSeconds)
+    if (lastTrackPreviewPath) {
+      unlink(lastTrackPreviewPath).catch(() => {})
+    }
+    lastTrackPreviewPath = outPath
+    return outPath
+  }
+)
+
 ipcMain.handle('watch:start', (_event, folder: string) => {
   startWatchingFolder(folder, (filePath, createdAtMs) => {
     mainWindow?.webContents.send('watch:newClip', filePath, createdAtMs)
@@ -182,9 +206,10 @@ ipcMain.handle(
       captions: boolean
       captionLines?: CaptionLine[]
       preset?: ExportPreset
+      audioTrackIndex?: number
     }
   ) => {
-    const { videoPath, start, end, captions, captionLines, preset } = args
+    const { videoPath, start, end, captions, captionLines, preset, audioTrackIndex } = args
     const ext = extname(videoPath)
     const base = basename(videoPath, ext)
     const defaultName = `${base}-clip-${Math.round(start)}s${ext || '.mp4'}`
@@ -202,7 +227,7 @@ ipcMain.handle(
     const branding = await loadBrandingSettings()
 
     try {
-      await renderClip(videoPath, start, end, result.filePath, srtPath, preset, branding)
+      await renderClip(videoPath, start, end, result.filePath, srtPath, preset, branding, audioTrackIndex ?? 0)
     } finally {
       if (srtPath) unlink(srtPath).catch(() => {})
     }
@@ -215,7 +240,14 @@ ipcMain.handle(
   async (
     _event,
     args: {
-      clips: { videoPath: string; start: number; end: number; captions: boolean; captionLines?: CaptionLine[] }[]
+      clips: {
+        videoPath: string
+        start: number
+        end: number
+        captions: boolean
+        captionLines?: CaptionLine[]
+        audioTrackIndex?: number
+      }[]
       transitions?: boolean
       transitionStyle?: TransitionStyle
       transitionDuration?: number
@@ -271,7 +303,14 @@ ipcMain.handle(
   async (
     _event,
     args: {
-      clips: { videoPath: string; start: number; end: number; captions: boolean; captionLines?: CaptionLine[] }[]
+      clips: {
+        videoPath: string
+        start: number
+        end: number
+        captions: boolean
+        captionLines?: CaptionLine[]
+        audioTrackIndex?: number
+      }[]
       transitions?: boolean
       transitionStyle?: TransitionStyle
       transitionDuration?: number

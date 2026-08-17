@@ -13,7 +13,8 @@ export async function renderClip(
   outputPath: string,
   srtPath?: string,
   preset: ExportPreset = 'original',
-  branding?: BrandingSettings
+  branding?: BrandingSettings,
+  audioTrackIndex = 0
 ): Promise<void> {
   if (!ffmpegPath) {
     throw new Error('ffmpeg-static binary not found')
@@ -57,8 +58,10 @@ export async function renderClip(
   }
 
   // Loudness normalization always runs, unlike the opt-in video-side stages above — there's
-  // no real downside to consistent audio levels, so it isn't a toggle.
-  filterStages.push(`[0:a]${LOUDNORM_FILTER}[loudaudio]`)
+  // no real downside to consistent audio levels, so it isn't a toggle. audioTrackIndex picks
+  // which of the source's audio streams to keep (e.g. game audio vs. mic on multi-track
+  // recordings) — ffmpeg would otherwise silently use only the first one.
+  filterStages.push(`[0:a:${audioTrackIndex}]${LOUDNORM_FILTER}[loudaudio]`)
 
   args.push(
     // Now unambiguously an output option: it's past every -i, so it limits the final output

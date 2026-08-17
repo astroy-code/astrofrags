@@ -79,6 +79,7 @@ interface ClipItem {
   start: number
   end: number
   captions: boolean
+  audioTrackIndex: number
   exportStatus: 'idle' | 'exporting' | 'done' | 'error'
   exportedPath: string | null
   exportError: string | null
@@ -94,6 +95,7 @@ interface SessionClipSnapshot {
   start: number
   end: number
   captions: boolean
+  audioTrackIndex: number
 }
 
 interface SessionSnapshot {
@@ -189,6 +191,12 @@ export default function App(): JSX.Element {
   )
   const [watchFolder, setWatchFolder] = useState<string | null>(null)
   const [recentClips, setRecentClips] = useState<{ path: string; createdAtMs: number }[]>([])
+  // Which of the loaded video's audio streams new clips should use (e.g. game audio vs. mic
+  // on multi-track recordings) — a per-video choice, reset whenever a different video loads.
+  const [audioTrackCount, setAudioTrackCount] = useState(1)
+  const [audioTrackIndex, setAudioTrackIndex] = useState(0)
+  const [trackPreviewPath, setTrackPreviewPath] = useState<string | null>(null)
+  const [trackPreviewLoading, setTrackPreviewLoading] = useState(false)
   const [sessionHistory, setSessionHistory] = useState<SessionSnapshot[]>([])
 
   useEffect(() => {
@@ -255,6 +263,7 @@ export default function App(): JSX.Element {
       start,
       end,
       captions: false,
+      audioTrackIndex,
       exportStatus: 'idle',
       exportedPath: null,
       exportError: null,
@@ -513,6 +522,7 @@ export default function App(): JSX.Element {
       start,
       end,
       captions: false,
+      audioTrackIndex,
       exportStatus: 'idle',
       exportedPath: null,
       exportError: null,
@@ -534,6 +544,22 @@ export default function App(): JSX.Element {
 
   function toggleManualClipMode(): void {
     setManualClipMode((prev) => !prev)
+  }
+
+  async function handlePreviewAudioTrack(): Promise<void> {
+    if (!videoPath) return
+    setTrackPreviewLoading(true)
+    try {
+      const seekSeconds = videoRef.current?.currentTime ?? 0
+      const previewPath = await window.api.previewAudioTrack(videoPath, audioTrackIndex, seekSeconds)
+      setTrackPreviewPath(previewPath)
+    } catch (err) {
+      // Lightweight failure handling — a failed preview isn't worth a dedicated error UI,
+      // the user can just retry.
+      console.error(err)
+    } finally {
+      setTrackPreviewLoading(false)
+    }
   }
 
   function moveClip(id: number, direction: 'up' | 'down'): void {
@@ -618,6 +644,7 @@ export default function App(): JSX.Element {
         start: start + shrink / 2,
         end: end - shrink / 2,
         captions: false,
+        audioTrackIndex,
         exportStatus: 'idle',
         exportedPath: null,
         exportError: null,
@@ -653,6 +680,18 @@ export default function App(): JSX.Element {
     setVisualDetectError(null)
     clipRegionsRef.current.clear()
     visualMarkerRegionsRef.current = []
+
+    // Reset to the single-track default immediately so the selector doesn't briefly show a
+    // stale count from the previous video while the probe below is still in flight.
+    setAudioTrackCount(1)
+    setAudioTrackIndex(0)
+    setTrackPreviewPath(null)
+    // Fire-and-forget: doesn't gate the rest of loading, and a probe failure just means the
+    // track selector stays hidden (falls back to today's single-track behavior).
+    window.api
+      .probeAudioTrackCount(path)
+      .then(setAudioTrackCount)
+      .catch(() => setAudioTrackCount(1))
 
     try {
       const { wav, peaks: detected, previewPath: preview } = await window.api.analyzeVideo(path)
@@ -761,7 +800,8 @@ export default function App(): JSX.Element {
           sourceVideoPath: c.sourceVideoPath,
           start: c.start,
           end: c.end,
-          captions: c.captions
+          captions: c.captions,
+          audioTrackIndex: c.audioTrackIndex
         })),
         transitionsEnabled,
         transitionStyle,
@@ -874,7 +914,8 @@ export default function App(): JSX.Element {
         clip.end,
         clip.captions,
         clip.captionPreview ?? undefined,
-        exportPreset
+        exportPreset,
+        clip.audioTrackIndex
       )
       setClips((prev) =>
         prev.map((c) =>
@@ -924,7 +965,8 @@ export default function App(): JSX.Element {
           start: c.start,
           end: c.end,
           captions: c.captions,
-          captionLines: c.captionPreview ?? undefined
+          captionLines: c.captionPreview ?? undefined,
+          audioTrackIndex: c.audioTrackIndex
         })),
         transitionsEnabled,
         musicPath ?? undefined,
@@ -956,7 +998,8 @@ export default function App(): JSX.Element {
           start: c.start,
           end: c.end,
           captions: c.captions,
-          captionLines: c.captionPreview ?? undefined
+          captionLines: c.captionPreview ?? undefined,
+          audioTrackIndex: c.audioTrackIndex
         })),
         transitionsEnabled,
         musicPath ?? undefined,
@@ -1351,6 +1394,39 @@ export default function App(): JSX.Element {
             <span style={{ color: '#5bd68d', fontSize: 13 }}>
               Click and drag on the waveform to select a clip — no detected moment needed.
             </span>
+          )}
+        </div>
+      )}
+
+      {videoPath && audioTrackCount > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            Audio track
+            <select
+              value={audioTrackIndex}
+              onChange={(e) => setAudioTrackIndex(Number(e.target.value))}
+              style={{ padding: '4px 6px' }}
+            >
+              {Array.from({ length: audioTrackCount }, (_, i) => (
+                <option key={i} value={i}>
+                  Track {i + 1}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            onClick={handlePreviewAudioTrack}
+            disabled={trackPreviewLoading}
+            style={{ padding: '4px 10px', cursor: 'pointer' }}
+          >
+            {trackPreviewLoading ? 'Loading…' : '▶ Preview'}
+          </button>
+          <span style={{ color: '#999', fontSize: 12 }}>
+            This video has {audioTrackCount} separate audio tracks (e.g. game audio and mic) — pick which one new
+            clips use, or preview to tell them apart.
+          </span>
+          {trackPreviewPath && (
+            <audio key={trackPreviewPath} controls autoPlay src={toFileUrl(trackPreviewPath)} style={{ height: 28 }} />
           )}
         </div>
       )}

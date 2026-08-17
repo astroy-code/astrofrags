@@ -67,6 +67,7 @@ interface SessionClipSnapshot {
   start: number
   end: number
   captions: boolean
+  audioTrackIndex: number
 }
 
 interface SessionSnapshot {
@@ -101,6 +102,8 @@ declare global {
       getSessionHistory: () => Promise<SessionSnapshot[]>
       saveSessionSnapshot: (snapshot: SessionSnapshot) => Promise<SessionSnapshot[]>
       deleteSessionSnapshot: (id: string) => Promise<SessionSnapshot[]>
+      probeAudioTrackCount: (videoPath: string) => Promise<number>
+      previewAudioTrack: (videoPath: string, trackIndex: number, seekSeconds: number) => Promise<string>
       analyzeVideo: (videoPath: string) => Promise<AnalyzeResult>
       previewCaptions: (videoPath: string, start: number, end: number) => Promise<CaptionLine[]>
       detectVisualEvents: (videoPath: string, region: VisualRegion) => Promise<Peak[]>
@@ -110,7 +113,8 @@ declare global {
         end: number,
         captions: boolean,
         captionLines?: CaptionLine[],
-        preset?: ExportPreset
+        preset?: ExportPreset,
+        audioTrackIndex?: number
       ) => Promise<ExportClipResult | null>
       exportReel: (
         clips: {
@@ -119,6 +123,7 @@ declare global {
           end: number
           captions: boolean
           captionLines?: CaptionLine[]
+          audioTrackIndex?: number
         }[],
         transitions: boolean,
         musicPath?: string,
@@ -134,6 +139,7 @@ declare global {
           end: number
           captions: boolean
           captionLines?: CaptionLine[]
+          audioTrackIndex?: number
         }[],
         transitions: boolean,
         musicPath?: string,

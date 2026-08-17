@@ -47,6 +47,10 @@ const api = {
     ipcRenderer.invoke('settings:saveSessionSnapshot', snapshot),
   deleteSessionSnapshot: (id: string): Promise<SessionSnapshot[]> =>
     ipcRenderer.invoke('settings:deleteSessionSnapshot', id),
+  probeAudioTrackCount: (videoPath: string): Promise<number> =>
+    ipcRenderer.invoke('audio:probeTrackCount', videoPath),
+  previewAudioTrack: (videoPath: string, trackIndex: number, seekSeconds: number): Promise<string> =>
+    ipcRenderer.invoke('audio:previewTrack', { videoPath, trackIndex, seekSeconds }),
   analyzeVideo: (videoPath: string): Promise<AnalyzeResult> =>
     ipcRenderer.invoke('audio:analyze', videoPath),
   previewCaptions: (videoPath: string, start: number, end: number): Promise<CaptionLine[]> =>
@@ -59,9 +63,10 @@ const api = {
     end: number,
     captions: boolean,
     captionLines?: CaptionLine[],
-    preset?: ExportPreset
+    preset?: ExportPreset,
+    audioTrackIndex?: number
   ): Promise<ExportClipResult | null> =>
-    ipcRenderer.invoke('clip:export', { videoPath, start, end, captions, captionLines, preset }),
+    ipcRenderer.invoke('clip:export', { videoPath, start, end, captions, captionLines, preset, audioTrackIndex }),
   exportReel: (
     clips: {
       videoPath: string
@@ -69,6 +74,7 @@ const api = {
       end: number
       captions: boolean
       captionLines?: CaptionLine[]
+      audioTrackIndex?: number
     }[],
     transitions: boolean,
     musicPath?: string,
@@ -93,6 +99,7 @@ const api = {
       end: number
       captions: boolean
       captionLines?: CaptionLine[]
+      audioTrackIndex?: number
     }[],
     transitions: boolean,
     musicPath?: string,

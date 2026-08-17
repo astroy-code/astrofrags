@@ -11,6 +11,7 @@ export interface SessionClipSnapshot {
   start: number
   end: number
   captions: boolean
+  audioTrackIndex: number
 }
 
 export interface SessionSnapshot {

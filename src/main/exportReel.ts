@@ -22,6 +22,7 @@ interface ClipRange {
   start: number
   end: number
   srtPath?: string
+  audioTrackIndex?: number
 }
 
 export const TRANSITION_STYLES = [
@@ -67,15 +68,19 @@ interface CombinedStage {
 
 /** Clips can come from different source files (stitching across multiple recordings), so
  * each clip's trim/subtitle stage references its own ffmpeg input index rather than a
- * single shared `0:v:0`/`0:a:0`. */
+ * single shared `0:v:0`/`0:a:0`. Each clip's audioTrackIndex also travels independently
+ * (defaulting to 0, ffmpeg's implicit choice) since different source videos can have
+ * different audio-track layouts — e.g. one recording's game audio might be track 0 and
+ * another's track 1, depending on capture settings at the time. */
 function buildClipSegments(clips: ClipRange[], inputIndexByPath: Map<string, number>): string[] {
   return clips.map((clip, i) => {
     const inputIndex = inputIndexByPath.get(clip.videoPath)
     // Each clip's SRT is already 0-based relative to its own trim start (matching
     // what transcribeClip produces), so it can burn in pre-trim with no offset math.
     const subtitleStage = clip.srtPath ? `,subtitles=${escapeSubtitlesPath(clip.srtPath)}` : ''
+    const audioTrackIndex = clip.audioTrackIndex ?? 0
     const v = `[${inputIndex}:v:0]trim=start=${clip.start}:end=${clip.end},setpts=PTS-STARTPTS${subtitleStage}[v${i}]`
-    const a = `[${inputIndex}:a:0]atrim=start=${clip.start}:end=${clip.end},asetpts=PTS-STARTPTS[a${i}]`
+    const a = `[${inputIndex}:a:${audioTrackIndex}]atrim=start=${clip.start}:end=${clip.end},asetpts=PTS-STARTPTS[a${i}]`
     return `${v}; ${a}`
   })
 }
