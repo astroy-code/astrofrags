@@ -19,7 +19,7 @@ import { estimateExportSeconds } from './lib/estimate.ts'
 import { ExportCancelledError, exportTrimmedClip } from './lib/exportClip.ts'
 import type { ExportClip } from './lib/exportClip.ts'
 import { formatOutputSize } from './lib/exportFormat.ts'
-import { fitReelToCap, SHORTS_CAP_SECONDS } from './lib/fitToCap.ts'
+import { fitReelToCap, isOverCap, SHORTS_CAP_SECONDS } from './lib/fitToCap.ts'
 import { formatTime } from './lib/formatTime.ts'
 import { planDurationSeconds } from './lib/exportGraph.ts'
 import { UNDECODABLE_MESSAGE } from './lib/previewSupport.ts'
@@ -177,7 +177,7 @@ export function App(): JSX.Element {
       : null
 
   const isShorts = branding.exportFormat === 'vertical' || branding.exportFormat === 'vertical-crop'
-  const overShortsCap = isShorts && exportedSeconds !== null && exportedSeconds > SHORTS_CAP_SECONDS
+  const overShortsCap = isShorts && exportedSeconds !== null && isOverCap(exportedSeconds, SHORTS_CAP_SECONDS)
 
   const handleFitToCap = useCallback(() => {
     const cards =

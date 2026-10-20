@@ -18,7 +18,15 @@ export interface FitInput {
 // Shortening a clip can also shorten the crossfade (it is limited to half the shortest clip), which
 // lengthens the reel a little again, so the fit is repeated until it settles.
 const MAX_PASSES = 6
-const EPSILON = 1e-6
+const MS_PER_SECOND = 1000
+
+/**
+ * Whether a reel is over the cap, judged to the millisecond (the precision the export works at),
+ * so floating-point noise after a fit never leaves the page showing a no-op "Fit" button.
+ */
+export function isOverCap(seconds: number, capSeconds: number): boolean {
+  return Math.round(seconds * MS_PER_SECOND) > Math.round(capSeconds * MS_PER_SECOND)
+}
 
 const lengthOf = (range: TrimRange): number => range.end - range.start
 
@@ -51,7 +59,7 @@ export function fitReelToCap({
   let current = ranges
   for (let pass = 0; pass < MAX_PASSES && current.length > 0; pass += 1) {
     const total = exportedSeconds(current, cardSeconds, transitionSeconds)
-    if (total <= capSeconds + EPSILON) break
+    if (!isOverCap(total, capSeconds)) break
     const clipSum = current.reduce((sum, range) => sum + lengthOf(range), 0)
     const ratio = (clipSum - (total - capSeconds)) / clipSum
     const next = current.map((range) => shrink(range, ratio, minClipSeconds))
