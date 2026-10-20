@@ -213,3 +213,25 @@ export async function makeFixture(kind: FixtureKind, opts: FixtureOptions = {}):
   if (run.exitCode !== 0) throw new Error(`fixture ${kind} failed:\n${run.log.slice(-400)}`)
   return run.read(output)
 }
+
+/** The real length of one stream (`v:0`, `a:0`), found by decoding it to nothing and reading the last time=. */
+export async function streamSeconds(bytes: Uint8Array, specifier: 'v:0' | 'a:0', name = 'probe.bin'): Promise<number> {
+  const run = await runCore(['-i', name, '-map', `0:${specifier}`, '-f', 'null', '-'], { [name]: bytes })
+  const times = [...run.log.matchAll(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/g)]
+  const last = times[times.length - 1]
+  if (!last) throw new Error(`no time= in the log:\n${run.log.slice(-400)}`)
+  return Number(last[1]) * 3600 + Number(last[2]) * 60 + Number(last[3])
+}
+
+/** An MP4 whose audio is shorter than its picture, like a recorder that stopped the sound first. */
+export async function makeSkewedClip(videoSeconds: number, audioSeconds: number): Promise<Uint8Array> {
+  const run = await runCore(
+    [
+      '-f', 'lavfi', '-i', `testsrc=duration=${videoSeconds}:size=320x180:rate=30`,
+      '-f', 'lavfi', '-i', `sine=frequency=440:duration=${audioSeconds}`,
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-c:a', 'aac', 'skewed.mp4'
+    ]
+  )
+  if (run.exitCode !== 0) throw new Error(`could not make the skewed clip:\n${run.log.slice(-400)}`)
+  return run.read('skewed.mp4')
+}

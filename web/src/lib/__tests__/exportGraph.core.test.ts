@@ -5,7 +5,7 @@ import type { ClipPlan, ExportPlan } from '../exportGraph.ts'
 import { formatOutputSize } from '../exportFormat.ts'
 import { fitWithin } from '../outputGeometry.ts'
 import { watermarkRect } from '../overlayLayout.ts'
-import { makeFixture, meanVolumeDb, pixelAt, probeBytes, runCore } from './support/ffmpegCore.ts'
+import { makeFixture, makeSkewedClip, meanVolumeDb, pixelAt, probeBytes, runCore, streamSeconds } from './support/ffmpegCore.ts'
 
 const OUTPUT = { width: 320, height: 180 }
 const LOGO = { width: 64, height: 64 }
@@ -404,4 +404,34 @@ test('a preset reframes every clip of a reel with its own filter labels', async 
   const plan = presetPlan('vertical', { clips: [clipOf(0, 1), clipOf(0, 1)] })
   const info = await probeBytes(await exportReel(plan, [landscape, portrait]), 'out.mp4')
   assert.deepEqual([info.width, info.height], [1080, 1920])
+})
+
+// ---- Reels: segments whose streams do not match their trim ----
+
+test('a clip whose streams end before its trim end still joins at the planned length', async () => {
+  const video = await makeFixture('video', { duration: 2 })
+  // Both clips ask for 3 s of a 2 s file; without padding the transition never starts.
+  const plan = basePlan({
+    clips: [clipOf(0, 3), clipOf(0, 3)],
+    transition: { seconds: 0.5, styles: ['fade'] }
+  })
+  const out = await exportReel(plan, [video, video])
+  const picture = await streamSeconds(out, 'v:0', 'out.mp4')
+  const sound = await streamSeconds(out, 'a:0', 'out.mp4')
+  assert.ok(Math.abs(picture - 5.5) < 0.25, `picture ${picture}`)
+  assert.ok(Math.abs(sound - 5.5) < 0.25, `sound ${sound}`)
+})
+
+test('sound shorter than its picture does not drift across several joins', async () => {
+  const skewed = await makeSkewedClip(2, 1.5)
+  const plan = basePlan({
+    clips: [clipOf(0, 2), clipOf(0, 2), clipOf(0, 2), clipOf(0, 2)],
+    transition: { seconds: 0.3, styles: ['fade', 'fade', 'fade'] }
+  })
+  const out = await exportReel(plan, [skewed, skewed, skewed, skewed])
+  const picture = await streamSeconds(out, 'v:0', 'out.mp4')
+  const sound = await streamSeconds(out, 'a:0', 'out.mp4')
+  // 4 x 2 s less three 0.3 s overlaps.
+  assert.ok(Math.abs(picture - 7.1) < 0.25, `picture ${picture}`)
+  assert.ok(Math.abs(sound - 7.1) < 0.25, `sound ${sound}`)
 })

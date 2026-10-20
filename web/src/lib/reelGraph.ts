@@ -28,8 +28,30 @@ export interface ReelPlan {
 
 export const clipSeconds = (clip: ClipPlan): number => clip.end - clip.start
 
+/**
+ * A crossfade starts at an offset computed from the planned lengths, so each segment must really
+ * be that long. A file whose picture ends early (or runs short of the trim end) gets its last
+ * frame held; one that runs long is cut.
+ */
+function exactVideoLength(length: number): string {
+  const planned = seconds(length)
+  return `tpad=stop_mode=clone:stop_duration=${planned},trim=end=${planned},${RESET_TIMESTAMPS}`
+}
+
+/** The audio counterpart: silence pads a short track, so the sound cannot slide ahead of the picture at each join. */
+function exactAudioLength(length: number): string {
+  const planned = seconds(length)
+  return `apad=whole_dur=${planned},atrim=end=${planned},asetpts=PTS-STARTPTS`
+}
+
 /** One clip's picture, fitted to (original) or reframed into (preset) the output frame. */
-function clipVideoStage(plan: ReelPlan, index: number, single: boolean, normalize: boolean): string {
+function clipVideoStage(
+  plan: ReelPlan,
+  index: number,
+  single: boolean,
+  normalize: boolean,
+  exact: boolean
+): string {
   const { width, height } = plan.output
   const input = `[${index}:v:0]`
   const output = single ? '[main_v]' : `[v_${index}]`
@@ -40,19 +62,26 @@ function clipVideoStage(plan: ReelPlan, index: number, single: boolean, normaliz
         `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`
       : `${buildReframeStage(plan.format, input, reframed, single ? '' : `c${index}_`)};${reframed}setsar=1`
   // Joined segments must match: 30 fps, yuv420p, timestamps from zero.
-  return normalize
-    ? `${fit},fps=${FRAME_RATE},format=yuv420p,${RESET_TIMESTAMPS}${output}`
-    : `${fit}${output}`
+  if (!normalize) return `${fit}${output}`
+  const normalized = `${fit},fps=${FRAME_RATE},format=yuv420p,${RESET_TIMESTAMPS}`
+  return exact ? `${normalized},${exactVideoLength(clipSeconds(plan.clips[index]))}${output}` : `${normalized}${output}`
 }
 
 /** The chosen track, or generated silence so the graph is uniform when the clip has no audio. */
-function clipAudioStage(clip: ClipPlan, index: number, single: boolean, normalize: boolean): string {
+function clipAudioStage(
+  clip: ClipPlan,
+  index: number,
+  single: boolean,
+  normalize: boolean,
+  exact: boolean
+): string {
   const output = single ? '[main_a]' : `[a_${index}]`
   if (clip.audioTrackIndex === null) {
     return `${SILENCE_SOURCE},atrim=duration=${seconds(clipSeconds(clip))},asetpts=PTS-STARTPTS${output}`
   }
   const tail = normalize ? 'asetpts=PTS-STARTPTS' : 'anull'
-  return `[${index}:a:${clip.audioTrackIndex}]${STEREO_48K},${tail}${output}`
+  const exactTail = exact ? `,${exactAudioLength(clipSeconds(clip))}` : ''
+  return `[${index}:a:${clip.audioTrackIndex}]${STEREO_48K},${tail}${exactTail}${output}`
 }
 
 /** Hard cuts: every normalised clip, back to back. */
@@ -96,9 +125,11 @@ export function reelStages(plan: ReelPlan, forceNormalize: boolean): string[] {
   if (count === 0) throw new Error('A reel needs at least one clip.')
   const single = count === 1
   const normalize = forceNormalize || !single
+  // Only crossfades depend on each segment's exact length; concat pads a short stream itself.
+  const exact = !single && plan.transition !== null
   const stages = plan.clips.flatMap((clip, i) => [
-    clipVideoStage(plan, i, single, normalize),
-    clipAudioStage(clip, i, single, normalize)
+    clipVideoStage(plan, i, single, normalize, exact),
+    clipAudioStage(clip, i, single, normalize, exact)
   ])
   if (single) return stages
   if (plan.transition && plan.transition.styles.length !== count - 1) {
