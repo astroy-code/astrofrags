@@ -1,6 +1,8 @@
 import { FFFSType } from '@ffmpeg/ffmpeg'
 import type { FFmpeg } from '@ffmpeg/ffmpeg'
-import { buildTrimArgs } from './ffmpegArgs.ts'
+import { measureLevel } from './audioLevels.ts'
+import type { TrackLevel } from './audioLevels.ts'
+import { buildLevelProbeArgs, buildTrimArgs } from './ffmpegArgs.ts'
 import { countAudioStreams } from './ffmpegLog.ts'
 import { trimmedFileName } from './fileNames.ts'
 import { validateTrimRange } from './trimRange.ts'
@@ -9,6 +11,8 @@ import { getFFmpeg, resetFFmpeg, runExclusive } from './ffmpegInstance.ts'
 const MOUNT_DIR = '/in'
 const INPUT_NAME = 'input'
 const OUTPUT_NAME = 'output.mp4'
+const LEVEL_FILE = 'level.pcm'
+const BYTES_PER_SAMPLE = 2
 const LOG_TAIL_CHARS = 500
 
 export class ExportCancelledError extends Error {
@@ -23,6 +27,7 @@ export interface ExportRequest {
   readonly start: number
   readonly end: number
   readonly duration: number
+  readonly audioTrackIndex: number
   readonly onProgress: (ratio: number) => void
   readonly signal?: AbortSignal
 }
@@ -53,26 +58,55 @@ async function withMountedFile<T>(
   }
 }
 
-/** Best-effort audio stream count; resolves 0 on any failure and never throws. */
-export async function probeAudioStreams(file: File): Promise<number> {
+/** `-i` with no output exits non-zero but prints the stream listing, which is all we need. */
+async function readStreamListing(ffmpeg: FFmpeg, inputPath: string): Promise<string> {
+  let log = ''
+  const onLog = ({ message }: { message: string }): void => {
+    log += `${message}\n`
+  }
+  ffmpeg.on('log', onLog)
+  try {
+    await ffmpeg.exec(['-i', inputPath])
+  } finally {
+    ffmpeg.off('log', onLog)
+  }
+  return log
+}
+
+/** Decodes one track and measures it; a track that fails to decode counts as silent. */
+async function measureTrack(ffmpeg: FFmpeg, inputPath: string, trackIndex: number): Promise<TrackLevel> {
+  try {
+    const exitCode = await ffmpeg.exec(buildLevelProbeArgs({ inputPath, trackIndex, outputPath: LEVEL_FILE }))
+    if (exitCode !== 0) return { rms: 0, peak: 0 }
+    const data = await ffmpeg.readFile(LEVEL_FILE)
+    if (typeof data === 'string') return { rms: 0, peak: 0 }
+    // Copy so the Int16Array view starts on an aligned, whole-sample buffer.
+    const bytes = data.slice()
+    return measureLevel(new Int16Array(bytes.buffer, 0, Math.floor(bytes.length / BYTES_PER_SAMPLE)))
+  } finally {
+    await ffmpeg.deleteFile(LEVEL_FILE).catch(() => undefined)
+  }
+}
+
+/**
+ * Best-effort loudness of every audio track, in track order. Resolves to [] on any failure
+ * (or for a file with no audio) and never throws.
+ */
+export async function probeAudioTracks(file: File): Promise<readonly TrackLevel[]> {
   try {
     return await runExclusive(async () => {
       const ffmpeg = await getFFmpeg()
-      let log = ''
-      const onLog = ({ message }: { message: string }): void => {
-        log += `${message}\n`
-      }
-      ffmpeg.on('log', onLog)
-      try {
-        // `-i` with no output exits non-zero but prints the stream listing, which is all we need.
-        await withMountedFile(ffmpeg, file, (inputPath) => ffmpeg.exec(['-i', inputPath]))
-      } finally {
-        ffmpeg.off('log', onLog)
-      }
-      return countAudioStreams(log)
+      return withMountedFile(ffmpeg, file, async (inputPath) => {
+        const trackCount = countAudioStreams(await readStreamListing(ffmpeg, inputPath))
+        const levels: TrackLevel[] = []
+        for (let trackIndex = 0; trackIndex < trackCount; trackIndex += 1) {
+          levels.push(await measureTrack(ffmpeg, inputPath, trackIndex))
+        }
+        return levels
+      })
     })
   } catch {
-    return 0
+    return []
   }
 }
 
@@ -114,7 +148,15 @@ async function runExport(req: ExportRequest): Promise<ExportResult> {
   ffmpeg.on('progress', onProgress)
   try {
     const exitCode = await withMountedFile(ffmpeg, req.file, (inputPath) =>
-      ffmpeg.exec(buildTrimArgs({ inputPath, outputPath: OUTPUT_NAME, start: req.start, end: req.end }))
+      ffmpeg.exec(
+        buildTrimArgs({
+          inputPath,
+          outputPath: OUTPUT_NAME,
+          start: req.start,
+          end: req.end,
+          audioTrackIndex: req.audioTrackIndex
+        })
+      )
     )
     if (exitCode !== 0) {
       throw new Error(`ffmpeg failed (exit ${exitCode}): ${log.slice(-LOG_TAIL_CHARS)}`)

@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import ffmpegPath from 'ffmpeg-static'
 
 // Playwright loads this file as CommonJS, so __dirname is available and import.meta is not.
-const FIXTURE_NAMES: Record<'clip' | 'silent' | 'awkward' | 'audioOnly', string> = JSON.parse(
+const FIXTURE_NAMES: Record<'clip' | 'silent' | 'awkward' | 'audioOnly' | 'twoTrack', string> = JSON.parse(
   readFileSync(join(__dirname, 'fixtures', 'names.json'), 'utf8')
 )
 const FIXTURE_DIR = join(__dirname, '.fixtures')
@@ -36,6 +36,18 @@ function probe(filePath: string): Probe {
     hasAudio: /Stream #\d+:\d+.*: Audio:/.test(stderr),
     durationSeconds: h * 3600 + m * 60 + s
   }
+}
+
+/** Mean loudness of the first audio stream via ffmpeg's volumedetect; -Infinity for digital silence. */
+function meanVolumeDb(filePath: string): number {
+  const { stderr } = spawnSync(
+    ffmpegPath as string,
+    ['-i', filePath, '-vn', '-af', 'volumedetect', '-f', 'null', '-'],
+    { encoding: 'utf8' }
+  )
+  const match = /mean_volume: (-inf|-?[\d.]+) dB/.exec(stderr)
+  if (!match) throw new Error(`volumedetect printed no mean_volume:\n${stderr.slice(-400)}`)
+  return match[1] === '-inf' ? -Infinity : Number(match[1])
 }
 
 async function setRange(page: Page, testId: string, value: number): Promise<void> {
@@ -94,6 +106,22 @@ test('makes no network requests outside its own origin', async ({ page, baseURL 
   expect(external).toEqual([])
 })
 
+test('picks the loudest audio track and lets the user override it', async ({ page }) => {
+  await pickAndWaitReady(page, FIXTURE_NAMES.twoTrack)
+  const picker = page.getByTestId('audio-track')
+  await expect(picker).toBeVisible()
+  // Track 1 is silent; the loud one is track 2 (index 1) and must be chosen automatically.
+  await expect(picker).toHaveValue('1')
+  await setRange(page, 'end-slider', 3)
+
+  const loud = await exportAndSave(page)
+  expect(meanVolumeDb(loud.savedPath)).toBeGreaterThan(-40)
+
+  await picker.selectOption('0')
+  const silent = await exportAndSave(page)
+  expect(meanVolumeDb(silent.savedPath)).toBeLessThan(-80)
+})
+
 test('exports a clip with no audio stream', async ({ page }) => {
   await pickAndWaitReady(page, FIXTURE_NAMES.silent)
   await setRange(page, 'end-slider', 3)
@@ -127,28 +155,42 @@ test('cancel returns to ready and a second export works', async ({ page }) => {
   expect(probe(savedPath).videoCodec).toBe('h264')
 })
 
-/** Holds the first ffmpeg core download so the engine is still loading when the test acts. */
-async function delayFirstCoreLoad(page: Page, delayMs: number): Promise<void> {
+/**
+ * Lets the first ffmpeg core download through, then holds every reload (the engine reloads
+ * after a cancel terminates it) so a test can act while it is still loading.
+ */
+async function delayReloads(page: Page, delayMs: number): Promise<void> {
   let requests = 0
   await page.route('**/ffmpeg-core.wasm', async (route) => {
     requests += 1
-    if (requests === 1) await new Promise((resolve) => setTimeout(resolve, delayMs))
+    if (requests > 1) await new Promise((resolve) => setTimeout(resolve, delayMs))
     await route.continue()
   })
 }
 
-test('cancel is honored immediately while the engine is still loading', async ({ page }) => {
-  await delayFirstCoreLoad(page, 6000)
+/** Starts an export and cancels it mid-run, which terminates the engine and forces a reload. */
+async function exportThenCancel(page: Page): Promise<void> {
+  await page.getByTestId('export-button').click()
+  await page.getByTestId('cancel-button').click()
+  await expect(page.getByTestId('export-button')).toBeEnabled()
+  // Idle shows no status; "Saved: ..." here would mean the export finished before the cancel landed.
+  await expect(page.getByTestId('export-status')).toBeHidden()
+}
+
+test('cancel is honored immediately while the engine is reloading', async ({ page }) => {
+  await delayReloads(page, 6000)
   const downloads: string[] = []
   page.on('download', (download) => downloads.push(download.suggestedFilename()))
 
   await page.goto('./')
   await page.getByTestId('file-input').setInputFiles(fixture(FIXTURE_NAMES.clip))
   await expect(page.getByTestId('export-button')).toBeEnabled()
+  await exportThenCancel(page)
+
   await page.getByTestId('export-button').click()
   await page.getByTestId('cancel-button').click()
 
-  // The engine load takes 6 s; the UI must not wait for it.
+  // The engine reload takes 6 s; the UI must not wait for it.
   await expect(page.getByTestId('export-button')).toBeEnabled({ timeout: 2000 })
   await page.waitForTimeout(9000)
   await expect(page.getByTestId('export-status')).toBeHidden()
@@ -156,13 +198,16 @@ test('cancel is honored immediately while the engine is still loading', async ({
 })
 
 test('picking another video during an export cancels it', async ({ page }) => {
-  await delayFirstCoreLoad(page, 4000)
+  await delayReloads(page, 4000)
   const downloads: string[] = []
   page.on('download', (download) => downloads.push(download.suggestedFilename()))
 
   await page.goto('./')
   await page.getByTestId('file-input').setInputFiles(fixture(FIXTURE_NAMES.clip))
   await expect(page.getByTestId('export-button')).toBeEnabled()
+  await exportThenCancel(page)
+
+  // The second export now waits on the delayed engine reload when the user picks another video.
   await page.getByTestId('export-button').click()
   await page.getByTestId('file-input').setInputFiles(fixture(FIXTURE_NAMES.silent))
 

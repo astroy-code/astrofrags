@@ -26,6 +26,15 @@ export function makeFixtures(outDir) {
   ffmpeg([...VIDEO_SOURCE, ...AUDIO_SOURCE, ...VP9, '-c:a', 'libopus', '-shortest', clip])
   ffmpeg([...VIDEO_SOURCE, ...VP9, join(outDir, FIXTURE_NAMES.silent)])
   copyFileSync(clip, join(outDir, FIXTURE_NAMES.awkward))
+  // Two audio tracks: a silent first one (like a mic-only track) and a loud second one.
+  ffmpeg([
+    ...VIDEO_SOURCE,
+    '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6',
+    '-map', '0:v', '-map', '1:a', '-map', '2:a',
+    ...VP9, '-c:a', 'libopus', '-t', '6',
+    join(outDir, FIXTURE_NAMES.twoTrack)
+  ])
   // An MP4 with only an audio track: metadata loads but there are no video dimensions.
   ffmpeg([...AUDIO_SOURCE, '-c:a', 'aac', join(outDir, FIXTURE_NAMES.audioOnly)])
 }

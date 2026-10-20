@@ -25,7 +25,7 @@ A browser build for quick jobs: pick a video, set a start and end, export the tr
 
 - **Large files:** above roughly 500 MB on desktop (200 MB on phones) the page warns that the browser may run out of memory. It never blocks you.
 - **HEVC/H.265 recordings:** whether the picture plays depends on your browser and device (Safari and recent Android Chrome use the device's hardware decoder). If it can't decode the video, the page says so and points you to the desktop app.
-- **Audio:** the clip keeps the video's first audio track.
+- **Audio:** the page measures every audio track and exports the loudest one (a multi-track recording's first track is often silent or mic-only). When a video has several tracks you can pick a different one from a dropdown. The preview plays the browser's default track, so it may sound different from the export.
 
 ```bash
 npm run web:dev     # local dev server

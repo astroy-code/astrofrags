@@ -145,6 +145,27 @@ button.primary {
   min-height: 44px;
 }
 
+.audio-track {
+  margin-top: var(--gutter);
+}
+
+.audio-track label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audio-track select {
+  min-height: 44px;
+  font: inherit;
+}
+
+.audio-track .hint {
+  margin: 4px 0 0;
+  font-size: 0.875rem;
+  opacity: 0.75;
+}
+
 .trim-summary {
   margin: var(--gutter) 0;
   opacity: 0.75;

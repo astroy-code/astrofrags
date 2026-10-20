@@ -28,7 +28,8 @@ Everything runs client-side. Nothing is uploaded anywhere (same promise as deskt
 
 - Highlight/peak detection, auto-build reel, kill-feed OCR, captions, reels, transitions,
   background music, branding/watermark/intro-outro, export format presets (9:16, 1:1),
-  audio-track selection, session history, folder watching.
+  session history, folder watching. (Audio-track selection was a non-goal here until a real
+  clip showed the first track can be silent; see the amended audio call below.)
 - Any integration with Medal. Medal has no supported public API for reading a user's clips
   (the old clip API's docs site was retired and its repo archived Aug 2026), so the
   pick-a-file flow is the deliberate design, not a stopgap.
@@ -91,10 +92,15 @@ Everything runs client-side. Nothing is uploaded anywhere (same promise as deskt
 - **Deploy via GitHub Actions** (`upload-pages-artifact` + `deploy-pages`) on pushes to
   `main` that touch the web app. The owner must set Pages source to "GitHub Actions" in
   repo settings (a manual, one-time step).
-- **Audio track:** export keeps the file's default (first) audio stream, which is the same
-  one the native `<video>` preview plays, so preview and export match. No mixing and no
-  track picker (desktop-only feature). Files with several tracks get a one-line notice
-  that the web version uses the default track and the desktop app can choose.
+- **Audio track (amended 2026-10-20 after a real Medal clip exported silent):** the first
+  track can be silent or mic-only, so the export uses the *loudest* audio track, found by
+  decoding each track in ffmpeg.wasm and measuring its level (RMS; silent below about -54
+  dBFS). Files with several tracks show a dropdown (level meter per track) to override the
+  automatic choice; no mixing. Export waits for the analysis so a fast click can't export
+  the wrong track. If every track is silent, a warning says the clip will probably be
+  silent. The `<video>` preview plays the browser's default track, so a hint notes that it
+  may sound different from the export. Replaces the original "first track only, no picker"
+  call.
 - **Over-limit files are a warning on every device, never a hard block.** On phones the
   wording is stronger and offers "Try anyway", because a wrong block is worse than a
   failed attempt the user can retry on desktop. The size-decision function returns

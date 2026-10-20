@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AudioTrackPicker } from './components/AudioTrackPicker.tsx'
 import { ExportBar } from './components/ExportBar.tsx'
 import type { ExportState } from './components/ExportBar.tsx'
 import { FilePicker } from './components/FilePicker.tsx'
 import { Notice } from './components/Notice.tsx'
 import { TrimPlayer } from './components/TrimPlayer.tsx'
 import type { VideoMetadata } from './components/TrimPlayer.tsx'
+import { isSilent, pickLoudestTrack } from './lib/audioLevels.ts'
+import type { TrackLevel } from './lib/audioLevels.ts'
 import { deliverClip } from './lib/deliverClip.ts'
 import { shouldAutoDeliver } from './lib/deliveryPolicy.ts'
-import { ExportCancelledError, exportTrimmedClip, probeAudioStreams } from './lib/exportClip.ts'
+import { ExportCancelledError, exportTrimmedClip, probeAudioTracks } from './lib/exportClip.ts'
 import { isPreviewUndecodable, UNDECODABLE_MESSAGE } from './lib/previewSupport.ts'
 import { checkFileSize, detectPlatform, parseLimitOverride, SOFT_LIMIT_BYTES } from './lib/sizeLimit.ts'
 import { validateTrimRange } from './lib/trimRange.ts'
@@ -18,7 +21,11 @@ interface Session {
   readonly objectUrl: string
   readonly duration: number
   readonly range: TrimRange
-  readonly audioStreams: number
+  /** Loudness per audio track; empty until the probe finishes (or for a file with no audio). */
+  readonly audioLevels: readonly TrackLevel[]
+  readonly audioProbeDone: boolean
+  /** The user's explicit track choice; null means "use the loudest". */
+  readonly audioTrackOverride: number | null
   readonly previewBroken: boolean
   readonly sizeWarningDismissed: boolean
 }
@@ -37,10 +44,16 @@ function newSession(file: File): Session {
     objectUrl: URL.createObjectURL(file),
     duration: 0,
     range: { start: 0, end: 0 },
-    audioStreams: 0,
+    audioLevels: [],
+    audioProbeDone: false,
+    audioTrackOverride: null,
     previewBroken: false,
     sizeWarningDismissed: false
   }
+}
+
+function selectedTrack(session: Session): number {
+  return session.audioTrackOverride ?? pickLoudestTrack(session.audioLevels)
 }
 
 function applyMetadata(session: Session, metadata: VideoMetadata): Session {
@@ -71,12 +84,15 @@ export function App(): JSX.Element {
 
   const handlePick = useCallback((file: File) => {
     // A running export belongs to the previous video; it must not finish into the new one.
+    // A running export belongs to the previous video; it must not finish into the new one.
     abortRef.current?.abort()
     exportedRef.current = null
     setExportState(IDLE)
     setSession(newSession(file))
-    void probeAudioStreams(file).then((audioStreams) =>
-      setSession((current) => (current && current.file === file ? { ...current, audioStreams } : current))
+    void probeAudioTracks(file).then((audioLevels) =>
+      setSession((current) =>
+        current && current.file === file ? { ...current, audioLevels, audioProbeDone: true } : current
+      )
     )
   }, [])
 
@@ -95,6 +111,7 @@ export function App(): JSX.Element {
         start: session.range.start,
         end: session.range.end,
         duration: session.duration,
+        audioTrackIndex: selectedTrack(session),
         onProgress: (progress) =>
           setExportState((current) => (current.phase === 'running' ? { phase: 'running', progress } : current)),
         signal: controller.signal
@@ -129,8 +146,17 @@ export function App(): JSX.Element {
     setSession(null)
   }, [])
 
+  // Export waits for the audio analysis so a quick click can't pick the wrong (silent) track.
   const canExport =
-    session !== null && !session.previewBroken && validateTrimRange(session.range, session.duration).ok
+    session !== null &&
+    session.audioProbeDone &&
+    !session.previewBroken &&
+    validateTrimRange(session.range, session.duration).ok
+  const allTracksSilent =
+    session !== null &&
+    session.audioProbeDone &&
+    session.audioLevels.length > 0 &&
+    session.audioLevels.every(isSilent)
   const sizeWarning =
     session !== null && !session.sizeWarningDismissed && checkFileSize(session.file.size, platform, limits) === 'warn'
 
@@ -153,9 +179,11 @@ export function App(): JSX.Element {
         </Notice>
       )}
 
-      {session && session.audioStreams > 1 && (
-        <Notice kind="info">
-          This video has several audio tracks. The web version keeps the first one; the desktop app lets you choose.
+      {session && !session.audioProbeDone && <p data-testid="audio-status">Analyzing audio…</p>}
+
+      {allTracksSilent && (
+        <Notice kind="warn">
+          No sound was detected in this video&apos;s audio, so the exported clip will probably be silent.
         </Notice>
       )}
 
@@ -169,6 +197,16 @@ export function App(): JSX.Element {
           range={session.range}
           onMetadata={handleMetadata}
           onRangeChange={(range) => setSession({ ...session, range })}
+        />
+      )}
+
+      {session && session.audioLevels.length > 1 && (
+        <AudioTrackPicker
+          levels={session.audioLevels}
+          selected={selectedTrack(session)}
+          onSelect={(audioTrackOverride) =>
+            setSession((current) => (current ? { ...current, audioTrackOverride } : current))
+          }
         />
       )}
 
