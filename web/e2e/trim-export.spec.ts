@@ -122,7 +122,7 @@ test('picks the loudest audio track and lets the user override it', async ({ pag
   expect(meanVolumeDb(silent.savedPath)).toBeLessThan(-80)
 })
 
-test('exports a clip with no audio stream', async ({ page }) => {
+test('exports a clip with no audio stream, giving it a silent audio track', async ({ page }) => {
   await pickAndWaitReady(page, FIXTURE_NAMES.silent)
   await setRange(page, 'end-slider', 3)
 
@@ -130,7 +130,10 @@ test('exports a clip with no audio stream', async ({ page }) => {
 
   const result = probe(savedPath)
   expect(result.videoCodec).toBe('h264')
-  expect(result.hasAudio).toBe(false)
+  // The export graph always carries audio (generated silence here) so cards, music and loudness
+  // normalization work the same for every clip.
+  expect(result.hasAudio).toBe(true)
+  expect(meanVolumeDb(savedPath)).toBeLessThan(-80)
 })
 
 test('handles an awkward file name', async ({ page }) => {

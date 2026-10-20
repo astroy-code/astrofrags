@@ -2,15 +2,28 @@ import { FFFSType } from '@ffmpeg/ffmpeg'
 import type { FFmpeg } from '@ffmpeg/ffmpeg'
 import { measureLevel } from './audioLevels.ts'
 import type { TrackLevel } from './audioLevels.ts'
-import { buildLevelProbeArgs, buildTrimArgs } from './ffmpegArgs.ts'
+import type { BrandingSettings } from './brandingSettings.ts'
+import { loadLogo, renderCardPng, renderLowerThirdPng } from './cardImages.ts'
+import type { Logo } from './cardImages.ts'
+import { buildExportArgs, planDurationSeconds } from './exportGraph.ts'
+import type { ExportInputs, ExportPlan } from './exportGraph.ts'
+import { buildLevelProbeArgs } from './ffmpegArgs.ts'
 import { countAudioStreams } from './ffmpegLog.ts'
 import { trimmedFileName } from './fileNames.ts'
+import { fitWithin } from './outputGeometry.ts'
+import type { Size } from './outputGeometry.ts'
+import { progressRatio } from './progress.ts'
 import { validateTrimRange } from './trimRange.ts'
 import { getFFmpeg, resetFFmpeg, runExclusive } from './ffmpegInstance.ts'
 
 const MOUNT_DIR = '/in'
 const INPUT_NAME = 'input'
+const MUSIC_NAME = 'music'
 const OUTPUT_NAME = 'output.mp4'
+const LOGO_FILE = 'logo.png'
+const INTRO_FILE = 'intro.png'
+const OUTRO_FILE = 'outro.png'
+const LOWER_THIRD_FILE = 'lower-third.png'
 const LEVEL_FILE = 'level.pcm'
 const BYTES_PER_SAMPLE = 2
 const LOG_TAIL_CHARS = 500
@@ -27,7 +40,12 @@ export interface ExportRequest {
   readonly start: number
   readonly end: number
   readonly duration: number
-  readonly audioTrackIndex: number
+  /** Zero-based audio stream to use; null when the video has no audio. */
+  readonly audioTrackIndex: number | null
+  readonly branding: BrandingSettings
+  readonly musicFile: File | null
+  /** The video's displayed size, from the preview element. */
+  readonly sourceSize: Size
   readonly onProgress: (ratio: number) => void
   readonly signal?: AbortSignal
 }
@@ -38,24 +56,28 @@ export interface ExportResult {
 }
 
 /**
- * Mounts the picked File read-only (no copy into WASM memory). The File is re-wrapped under a
- * fixed name so odd characters in the user's file name can't break ffmpeg paths.
+ * Mounts the picked Files read-only (no copy into WASM memory). Each File is re-wrapped under a
+ * fixed name so odd characters in the user's file names can't break ffmpeg paths.
  */
-async function withMountedFile<T>(
+async function withMountedFiles<T>(
   ffmpeg: FFmpeg,
-  file: File,
-  run: (inputPath: string) => Promise<T>
+  entries: readonly { readonly name: string; readonly file: File }[],
+  run: (paths: readonly string[]) => Promise<T>
 ): Promise<T> {
-  const wrapped = new File([file], INPUT_NAME, { type: file.type })
+  const wrapped = entries.map(({ name, file }) => new File([file], name, { type: file.type }))
   // The directory can already exist if a previous cleanup was interrupted.
   await ffmpeg.createDir(MOUNT_DIR).catch(() => undefined)
-  await ffmpeg.mount(FFFSType.WORKERFS, { files: [wrapped] }, MOUNT_DIR)
+  await ffmpeg.mount(FFFSType.WORKERFS, { files: wrapped }, MOUNT_DIR)
   try {
-    return await run(`${MOUNT_DIR}/${INPUT_NAME}`)
+    return await run(entries.map(({ name }) => `${MOUNT_DIR}/${name}`))
   } finally {
     await ffmpeg.unmount(MOUNT_DIR).catch(() => undefined)
     await ffmpeg.deleteDir(MOUNT_DIR).catch(() => undefined)
   }
+}
+
+function withMountedFile<T>(ffmpeg: FFmpeg, file: File, run: (inputPath: string) => Promise<T>): Promise<T> {
+  return withMountedFiles(ffmpeg, [{ name: INPUT_NAME, file }], ([inputPath]) => run(inputPath))
 }
 
 /** `-i` with no output exits non-zero but prints the stream listing, which is all we need. */
@@ -131,32 +153,81 @@ export async function exportTrimmedClip(req: ExportRequest): Promise<ExportResul
   }
 }
 
+function buildPlan(req: ExportRequest, logo: Logo): ExportPlan {
+  const { branding } = req
+  return {
+    clip: { start: req.start, end: req.end, audioTrackIndex: req.audioTrackIndex },
+    output: fitWithin(req.sourceSize),
+    logo: logo.size,
+    watermarkCorner: branding.watermarkCorner,
+    intro: branding.introEnabled,
+    outro: branding.outroEnabled,
+    cardSeconds: branding.cardDurationSeconds,
+    music: req.musicFile !== null,
+    lowerThird: branding.lowerThirdEnabled
+  }
+}
+
+type BrandingInputs = Omit<ExportInputs, 'video' | 'music'>
+
+/** Writes the logo and any card or overlay images into the ffmpeg filesystem. */
+async function writeBrandingFiles(
+  ffmpeg: FFmpeg,
+  plan: ExportPlan,
+  branding: BrandingSettings,
+  logo: Logo,
+  written: string[]
+): Promise<BrandingInputs> {
+  const write = async (name: string, data: Uint8Array): Promise<string> => {
+    // writeFile transfers the buffer to the worker, which would detach the cached logo bytes.
+    await ffmpeg.writeFile(name, data.slice())
+    written.push(name)
+    return name
+  }
+
+  const inputs: { logo: string; introCard?: string; outroCard?: string; lowerThird?: string } = {
+    logo: await write(LOGO_FILE, logo.bytes)
+  }
+  if (plan.intro || plan.outro) {
+    const card = await renderCardPng(branding, plan.output, logo)
+    if (plan.intro) inputs.introCard = await write(INTRO_FILE, card)
+    if (plan.outro) inputs.outroCard = await write(OUTRO_FILE, card)
+  }
+  if (plan.lowerThird) {
+    inputs.lowerThird = await write(LOWER_THIRD_FILE, await renderLowerThirdPng(branding, plan.output))
+  }
+  return inputs
+}
+
 async function runExport(req: ExportRequest): Promise<ExportResult> {
   if (req.signal?.aborted) throw new ExportCancelledError()
+  const logo = await loadLogo()
   const ffmpeg = await getFFmpeg()
   if (req.signal?.aborted) throw new ExportCancelledError()
+
+  const plan = buildPlan(req, logo)
+  const planSeconds = planDurationSeconds(plan)
 
   let log = ''
   const onLog = ({ message }: { message: string }): void => {
     log = `${log}${message}\n`.slice(-LOG_TAIL_CHARS * 4)
   }
-  const onProgress = ({ progress }: { progress: number }): void => {
-    req.onProgress(Math.min(1, Math.max(0, progress)))
+  // The engine's own ratio is relative to the input; its time is how much output is done.
+  const onProgress = ({ time }: { time: number }): void => {
+    req.onProgress(progressRatio(time, planSeconds))
   }
 
   ffmpeg.on('log', onLog)
   ffmpeg.on('progress', onProgress)
+  const written: string[] = []
   try {
-    const exitCode = await withMountedFile(ffmpeg, req.file, (inputPath) =>
-      ffmpeg.exec(
-        buildTrimArgs({
-          inputPath,
-          outputPath: OUTPUT_NAME,
-          start: req.start,
-          end: req.end,
-          audioTrackIndex: req.audioTrackIndex
-        })
-      )
+    const brandingInputs = await writeBrandingFiles(ffmpeg, plan, req.branding, logo, written)
+    const mounts = [
+      { name: INPUT_NAME, file: req.file },
+      ...(req.musicFile ? [{ name: MUSIC_NAME, file: req.musicFile }] : [])
+    ]
+    const exitCode = await withMountedFiles(ffmpeg, mounts, ([video, music]) =>
+      ffmpeg.exec(buildExportArgs(plan, { ...brandingInputs, video, music }, OUTPUT_NAME))
     )
     if (exitCode !== 0) {
       throw new Error(`ffmpeg failed (exit ${exitCode}): ${log.slice(-LOG_TAIL_CHARS)}`)
@@ -166,7 +237,6 @@ async function runExport(req: ExportRequest): Promise<ExportResult> {
     if (typeof data === 'string' || data.length === 0) {
       throw new Error('Export produced an empty file. The video may be in a format this browser cannot process.')
     }
-    await ffmpeg.deleteFile(OUTPUT_NAME).catch(() => undefined)
     return {
       blob: new Blob([data.slice()], { type: 'video/mp4' }),
       fileName: trimmedFileName(req.file.name, req.start, req.end)
@@ -175,5 +245,8 @@ async function runExport(req: ExportRequest): Promise<ExportResult> {
     // After a cancel the instance was terminated; these calls are harmless no-ops on it.
     ffmpeg.off('log', onLog)
     ffmpeg.off('progress', onProgress)
+    for (const name of [...written, OUTPUT_NAME]) {
+      await ffmpeg.deleteFile(name).catch(() => undefined)
+    }
   }
 }

@@ -13,8 +13,10 @@ import { shouldAutoDeliver } from './lib/deliveryPolicy.ts'
 import { ExportCancelledError, exportTrimmedClip, probeAudioTracks } from './lib/exportClip.ts'
 import { isPreviewUndecodable, UNDECODABLE_MESSAGE } from './lib/previewSupport.ts'
 import { checkFileSize, detectPlatform, parseLimitOverride, SOFT_LIMIT_BYTES } from './lib/sizeLimit.ts'
+import type { Size } from './lib/outputGeometry.ts'
 import { validateTrimRange } from './lib/trimRange.ts'
 import type { TrimRange } from './lib/trimRange.ts'
+import { useBrandingSettings } from './useBrandingSettings.ts'
 
 interface Session {
   readonly file: File
@@ -28,6 +30,8 @@ interface Session {
   readonly audioTrackOverride: number | null
   readonly previewBroken: boolean
   readonly sizeWarningDismissed: boolean
+  /** The video's displayed size; 0x0 until the preview reports it. */
+  readonly videoSize: Size
 }
 
 interface ExportedClip {
@@ -48,11 +52,14 @@ function newSession(file: File): Session {
     audioProbeDone: false,
     audioTrackOverride: null,
     previewBroken: false,
-    sizeWarningDismissed: false
+    sizeWarningDismissed: false,
+    videoSize: { width: 0, height: 0 }
   }
 }
 
-function selectedTrack(session: Session): number {
+/** The audio stream to export, or null when the video has none. */
+function selectedTrack(session: Session): number | null {
+  if (session.audioLevels.length === 0) return null
   return session.audioTrackOverride ?? pickLoudestTrack(session.audioLevels)
 }
 
@@ -64,13 +71,19 @@ function applyMetadata(session: Session, metadata: VideoMetadata): Session {
     duration: durationChanged ? metadata.duration : session.duration,
     // A new duration (including Infinity -> finite on some phone files) resets the range to the whole clip.
     range: durationChanged ? { start: 0, end: metadata.duration } : session.range,
-    previewBroken: metadata.kind === 'duration' ? session.previewBroken : isPreviewUndecodable(metadata)
+    previewBroken: metadata.kind === 'duration' ? session.previewBroken : isPreviewUndecodable(metadata),
+    videoSize:
+      metadata.videoWidth > 0 && metadata.videoHeight > 0
+        ? { width: metadata.videoWidth, height: metadata.videoHeight }
+        : session.videoSize
   }
 }
 
 export function App(): JSX.Element {
   const platform = useMemo(() => detectPlatform(navigator.userAgent, navigator.maxTouchPoints), [])
   const limits = useMemo(() => parseLimitOverride(window.location.search) ?? SOFT_LIMIT_BYTES, [])
+  const [branding] = useBrandingSettings()
+  // Music is picked per export and never persisted (see the branding design).
   const [session, setSession] = useState<Session | null>(null)
   const [exportState, setExportState] = useState<ExportState>(IDLE)
   const abortRef = useRef<AbortController | null>(null)
@@ -112,6 +125,9 @@ export function App(): JSX.Element {
         end: session.range.end,
         duration: session.duration,
         audioTrackIndex: selectedTrack(session),
+        branding,
+        musicFile: null,
+        sourceSize: session.videoSize,
         onProgress: (progress) =>
           setExportState((current) => (current.phase === 'running' ? { phase: 'running', progress } : current)),
         signal: controller.signal
@@ -130,7 +146,7 @@ export function App(): JSX.Element {
     } finally {
       if (abortRef.current === controller) abortRef.current = null
     }
-  }, [session, platform])
+  }, [session, platform, branding])
 
   const handleDeliverAgain = useCallback(async () => {
     const clip = exportedRef.current
@@ -151,6 +167,7 @@ export function App(): JSX.Element {
     session !== null &&
     session.audioProbeDone &&
     !session.previewBroken &&
+    session.videoSize.width > 0 &&
     validateTrimRange(session.range, session.duration).ok
   const allTracksSilent =
     session !== null &&
@@ -203,7 +220,7 @@ export function App(): JSX.Element {
       {session && session.audioLevels.length > 1 && (
         <AudioTrackPicker
           levels={session.audioLevels}
-          selected={selectedTrack(session)}
+          selected={selectedTrack(session) ?? 0}
           onSelect={(audioTrackOverride) =>
             setSession((current) => (current ? { ...current, audioTrackOverride } : current))
           }
