@@ -1,0 +1,55 @@
+name: Deploy web version to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'scripts/copy-ffmpeg-core.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # --ignore-scripts skips the Electron/sharp/ffmpeg-static downloads the web build doesn't need.
+      - run: npm ci --ignore-scripts
+
+      - run: npm test
+
+      - run: npm run web:build
+
+      # Nothing may load code from a third-party CDN at runtime (the ffmpeg core is self-hosted).
+      # The ffmpeg worker chunk is excluded: it carries an unused default unpkg URL that is never
+      # fetched because we always pass our own core URL; the E2E suite asserts no external requests.
+      - name: Check build has no CDN references
+        run: "! grep -rEl --exclude='worker-*.js' 'unpkg\\.com|jsdelivr|cdnjs' dist-web"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-web
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

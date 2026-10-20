@@ -77,6 +77,23 @@ test('trims a clip and downloads an H.264 mp4', async ({ page }) => {
   expect(Math.abs(result.durationSeconds - 3)).toBeLessThan(0.3)
 })
 
+test('makes no network requests outside its own origin', async ({ page, baseURL }) => {
+  const origin = new URL(baseURL as string).origin
+  const external: string[] = []
+  page.on('request', (request) => {
+    const url = request.url()
+    if (!url.startsWith('blob:') && !url.startsWith('data:') && new URL(url).origin !== origin) {
+      external.push(url)
+    }
+  })
+
+  await pickAndWaitReady(page, FIXTURE_NAMES.clip)
+  await setRange(page, 'end-slider', 2)
+  await exportAndSave(page)
+
+  expect(external).toEqual([])
+})
+
 test('exports a clip with no audio stream', async ({ page }) => {
   await pickAndWaitReady(page, FIXTURE_NAMES.silent)
   await setRange(page, 'end-slider', 3)

@@ -19,6 +19,22 @@ Grab the latest Windows installer from the [Releases page](https://github.com/as
 - **Folder watching** — point it at your capture folder and new recordings show up ready to open.
 - **Everything runs locally** — audio/video processing (ffmpeg), speech-to-text (Whisper), and OCR (Tesseract) all run on your machine. Nothing is uploaded anywhere.
 
+## Web version
+
+A browser build for quick jobs: pick a video, set a start and end, export the trimmed clip as an H.264 MP4. It runs entirely in your browser (ffmpeg.wasm), so nothing is uploaded, and it works on phones as well as desktops. Use the desktop app for long recordings and everything else (peak detection, reels, captions, branding, audio-track selection).
+
+- **Large files:** above roughly 500 MB on desktop (200 MB on phones) the page warns that the browser may run out of memory. It never blocks you.
+- **HEVC/H.265 recordings:** whether the picture plays depends on your browser and device (Safari and recent Android Chrome use the device's hardware decoder). If it can't decode the video, the page says so and points you to the desktop app.
+- **Audio:** the clip keeps the video's first audio track.
+
+```bash
+npm run web:dev     # local dev server
+npm run web:build   # static site in dist-web/
+npm run e2e         # Playwright end-to-end tests (Chromium)
+```
+
+It deploys to GitHub Pages from `main` through `.github/workflows/pages.yml`. One-time setup: in the repository's **Settings → Pages**, set **Source** to **GitHub Actions**.
+
 ## Development
 
 Requires [Node.js](https://nodejs.org/).

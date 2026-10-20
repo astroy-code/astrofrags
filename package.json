@@ -11,6 +11,7 @@
     "web:dev": "npm run web:prepare && vite --config web/vite.config.ts",
     "web:build": "npm run web:prepare && vite build --config web/vite.config.ts",
     "e2e": "playwright test",
+    "test:coverage": "node --test --experimental-test-coverage web/src/lib/__tests__/*.test.ts",
     "test": "node --test src/main/__tests__/*.test.ts web/src/lib/__tests__/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.site.json",
     "dist": "electron-vite build && electron-builder --win --publish=never"
