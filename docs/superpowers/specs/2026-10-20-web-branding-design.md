@@ -120,6 +120,12 @@ into tasks, and which test fixtures to generate.
 
 ## Testing expectations
 
+- **The pinned ffmpeg core runs inside Node** (shim `self` and `location`, then call
+  `createFFmpegCore({ wasmBinary })`, `setLogger`, `exec`, and the exposed `FS`). Verified:
+  every filter this design needs is present, and a tiny encode takes ~70 ms. Use this as a
+  test harness so filter graphs are integration-tested against the real core in well under a
+  second, instead of through a browser. Playwright stays for the end-to-end page flows.
+
 - Unit tests (Node test runner) for pure logic: filter-graph/argument builders (watermark
   position for each corner, card duration arithmetic, music duck/fade chain, loudnorm
   placement, output-size fitting), settings parse/merge with defaults and corrupt storage,
