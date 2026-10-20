@@ -221,6 +221,7 @@ web/e2e/                 (modify) fixtures + new tests
   - `drawCard(ctx: CanvasRenderingContext2D, settings: BrandingSettings, canvas: Size, logo: Logo): void` (shared by export and the preview)
   - `renderCardPng(settings: BrandingSettings, canvas: Size, logo: Logo): Promise<Uint8Array>`
   - `renderLowerThirdPng(text: string, canvas: Size): Promise<Uint8Array>` (transparent background, box and text per `lowerThirdLayout`, text truncated with an ellipsis to fit the width)
+  - `ExportRequest.audioTrackIndex` becomes `number | null`: `App` passes `null` when the audio analysis found no audio tracks (`audioLevels` empty), so the graph generates silent audio (Task 4); otherwise the selected track as today.
   - `ExportRequest` gains `readonly branding: BrandingSettings`, `readonly musicFile: File | null`, `readonly sourceSize: Size`; `exportTrimmedClip` builds the plan, writes the PNGs and logo to the ffmpeg filesystem, mounts the music file read-only like the clip, calls `buildExportArgs`, reports progress with `progressRatio(event.time, planDurationSeconds(plan))`, and removes every temporary file in `finally`.
 
 - [ ] **Step 1: Write failing test** `progress.test.ts`: `converts output time in microseconds to a ratio` (`progressRatio(1_500_000, 3) === 0.5`); `clamps to 0..1` (negative, above plan); `a non-positive plan gives 0`; `NaN gives 0`.
