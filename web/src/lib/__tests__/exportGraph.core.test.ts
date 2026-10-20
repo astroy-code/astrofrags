@@ -157,6 +157,56 @@ test('the watermark covers the cards too', async () => {
   assert.ok(inside.r > 200 && inside.g < 60 && inside.b < 60, JSON.stringify(inside))
 })
 
+const NO_AUDIO = { start: 0, end: 1, audioTrackIndex: null } as const
+
+test('music is audible over a clip with no audio', async () => {
+  const out = await exportClip(basePlan({ clip: NO_AUDIO, music: true }), await makeFixture('videoNoAudio'), {
+    music: await makeFixture('tone')
+  })
+  assert.ok((await meanVolumeDb(out, 'out.mp4')) > -40)
+})
+
+test('music never lengthens the output, even for a clip shorter than its fades', async () => {
+  const music = await makeFixture('tone', { duration: 3 })
+  const video = await makeFixture('videoNoAudio')
+  const normal = await exportClip(basePlan({ clip: NO_AUDIO, music: true }), video, { music })
+  assert.ok(Math.abs((await probeBytes(normal, 'out.mp4')).durationSeconds - 1) < 0.15)
+  const tiny = { start: 0, end: 0.5, audioTrackIndex: null } as const
+  const short = await exportClip(basePlan({ clip: tiny, music: true }), video, { music })
+  assert.ok(Math.abs((await probeBytes(short, 'out.mp4')).durationSeconds - 0.5) < 0.15)
+})
+
+test('music loops when it is shorter than the clip', async () => {
+  const video = await makeFixture('videoNoAudio')
+  const plan = basePlan({ clip: { start: 0, end: 2, audioTrackIndex: null }, music: true })
+  const out = await exportClip(plan, video, { music: await makeFixture('tone', { duration: 0.5 }) })
+  assert.ok((await meanVolumeDb(out, 'out.mp4', { start: 1.2, duration: 0.6 })) > -40)
+})
+
+test('the cards stay silent and the music plays only under the clip', async () => {
+  // A 6 s clip leaves a plateau between its two 2 s music fades (clip time 2..4 s).
+  const clip = { start: 0, end: 6, audioTrackIndex: null } as const
+  const plan = basePlan({ ...WITH_CARDS, intro: true, music: true, clip })
+  const out = await exportClip(plan, await makeFixture('videoNoAudio', { duration: 6 }), {
+    card: await cardPng(),
+    music: await makeFixture('tone', { duration: 6 })
+  })
+  // The intro occupies 0..3 s; the clip's plateau is at 3 + (2..4) s.
+  assert.ok((await meanVolumeDb(out, 'out.mp4', { start: 0.2, duration: 2.5 })) < -60)
+  assert.ok((await meanVolumeDb(out, 'out.mp4', { start: 5.5, duration: 1 })) > -40)
+})
+
+test('music still works with a loud clip and both cards', async () => {
+  const plan = basePlan({ ...WITH_CARDS, intro: true, outro: true, music: true })
+  const out = await exportClip(plan, await makeFixture('video'), {
+    card: await cardPng(),
+    music: await makeFixture('tone')
+  })
+  const info = await probeBytes(out, 'out.mp4')
+  assert.ok(Math.abs(info.durationSeconds - 7) < 0.25)
+  assert.equal(info.audioStreams, 1)
+})
+
 test('cards still work for a clip with no audio', async () => {
   const plan = basePlan({ ...WITH_CARDS, intro: true, outro: true, clip: { start: 0, end: 1, audioTrackIndex: null } })
   const out = await exportClip(plan, await makeFixture('videoNoAudio'), { card: await cardPng() })

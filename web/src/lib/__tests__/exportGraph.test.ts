@@ -59,6 +59,25 @@ test('selects the requested audio track, or generates silence when there is none
   assert.ok(!none.includes('[0:a:'))
 })
 
+test('the music stage uses the desktop loop, bed volume, fades, duck and mix', () => {
+  const plan = { ...PLAN, clip: { start: 0, end: 10, audioTrackIndex: 0 }, music: true }
+  const graph = graphOf(buildExportArgs(plan, { ...INPUTS, music: 'music.wav' }, 'out.mp4'))
+  for (const fragment of [
+    'aformat=sample_rates=48000:channel_layouts=stereo,aloop=loop=-1:size=2e9',
+    'atrim=0:10.000,asetpts=PTS-STARTPTS,volume=0.35',
+    'afade=t=in:st=0:d=2.000,afade=t=out:st=8.000:d=2.000',
+    'sidechaincompress=threshold=0.05:ratio=8:attack=5:release=300',
+    'amix=inputs=2:duration=first'
+  ]) {
+    assert.ok(graph.includes(fragment), `missing: ${fragment}`)
+  }
+})
+
+test('music is not wired in when the plan has none, and a missing file is reported', () => {
+  assert.ok(!graphOf(buildExportArgs(PLAN, INPUTS, 'o.mp4')).includes('sidechaincompress'))
+  assert.throws(() => buildExportArgs({ ...PLAN, music: true }, INPUTS, 'o.mp4'), /music/i)
+})
+
 test('planDurationSeconds adds a card duration for each card that is on', () => {
   assert.equal(planDurationSeconds(PLAN), 2)
   assert.equal(planDurationSeconds({ ...PLAN, intro: true }), 5)

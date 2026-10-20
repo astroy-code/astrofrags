@@ -1,5 +1,6 @@
 import type { WatermarkCorner } from './brandingSettings.ts'
 import type { Size } from './outputGeometry.ts'
+import { musicFadeSeconds } from './musicFade.ts'
 import { CARD_FADE_SECONDS, watermarkRect } from './overlayLayout.ts'
 
 export interface ExportPlan {
@@ -77,6 +78,30 @@ interface Labels {
   readonly audioLabel: string
 }
 
+/**
+ * The desktop music bed (exportReel.ts buildMusicStage), built on the clip audio only: loop the
+ * track to cover the clip, drop it to a quiet bed, fade the ends, duck it under the clip's own
+ * audio with sidechain compression, and mix. asplit gives the clip audio the two copies the
+ * sidechain trigger and the final mix each need.
+ */
+function musicStages(plan: ExportPlan, musicIndex: number, clipAudioLabel: string): Labels {
+  const clipSeconds = plan.clip.end - plan.clip.start
+  const fade = musicFadeSeconds(clipSeconds)
+  const fadeOutStart = Math.max(clipSeconds - fade, 0)
+  return {
+    stages: [
+      `${clipAudioLabel}asplit=2[dry][sidechain]`,
+      `[${musicIndex}:a]aformat=sample_rates=48000:channel_layouts=stereo,aloop=loop=-1:size=2e9,` +
+        `atrim=0:${seconds(clipSeconds)},asetpts=PTS-STARTPTS,volume=0.35,` +
+        `afade=t=in:st=0:d=${seconds(fade)},afade=t=out:st=${seconds(fadeOutStart)}:d=${seconds(fade)}[music]`,
+      '[music][sidechain]sidechaincompress=threshold=0.05:ratio=8:attack=5:release=300[ducked_music]',
+      '[dry][ducked_music]amix=inputs=2:duration=first[music_mix_a]'
+    ],
+    videoLabel: '[main_v]',
+    audioLabel: '[music_mix_a]'
+  }
+}
+
 function requireCard(path: string | undefined, kind: 'intro' | 'outro'): string {
   if (!path) throw new Error(`The ${kind} card image is missing.`)
   return path
@@ -97,7 +122,8 @@ function cardStages(kind: 'intro' | 'outro', inputIndex: number, plan: ExportPla
 function withCards(
   plan: ExportPlan,
   inputs: ExportInputs,
-  addInput: (args: string[]) => number
+  addInput: (args: string[]) => number,
+  clipAudioLabel: string
 ): Labels {
   const segments: string[] = []
   const stages: string[] = []
@@ -111,7 +137,7 @@ function withCards(
   }
 
   if (plan.intro) addCard('intro', inputs.introCard)
-  segments.push('[main_v][main_a]')
+  segments.push(`[main_v]${clipAudioLabel}`)
   if (plan.outro) addCard('outro', inputs.outroCard)
   stages.push(`${segments.join('')}concat=n=${segments.length}:v=1:a=1[carded_v][carded_a]`)
   return { stages, videoLabel: '[carded_v]', audioLabel: '[carded_a]' }
@@ -135,8 +161,16 @@ export function buildExportArgs(plan: ExportPlan, inputs: ExportInputs, outputPa
   let videoLabel = '[main_v]'
   let audioLabel = '[main_a]'
 
+  // Music sits on the clip only, before the cards are joined, so the cards stay silent.
+  if (plan.music) {
+    if (!inputs.music) throw new Error('The music file is missing.')
+    const music = musicStages(plan, addInput(['-i', inputs.music]), audioLabel)
+    stages.push(...music.stages)
+    audioLabel = music.audioLabel
+  }
+
   if (cardsOn) {
-    const carded = withCards(plan, inputs, addInput)
+    const carded = withCards(plan, inputs, addInput, audioLabel)
     stages.push(...carded.stages)
     videoLabel = carded.videoLabel
     audioLabel = carded.audioLabel
