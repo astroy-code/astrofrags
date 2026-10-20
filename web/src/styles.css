@@ -255,3 +255,87 @@ button.primary {
   min-height: 44px;
   font: inherit;
 }
+
+.file-picker.is-disabled {
+  opacity: 0.45;
+}
+
+.clip-list {
+  margin: var(--gutter) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.clip-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: var(--radius);
+}
+
+.clip-item.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.clip-select {
+  display: flex;
+  flex: 1 1 200px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  text-align: left;
+  border-color: transparent;
+}
+
+.clip-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clip-length {
+  opacity: 0.75;
+}
+
+.clip-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.transition-options {
+  margin: var(--gutter) 0 0;
+  padding: var(--gutter);
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: var(--radius);
+}
+
+.transition-options label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.transition-options label.check {
+  flex-direction: row;
+  align-items: center;
+  min-height: 44px;
+}
+
+.transition-options input[type='number'],
+.transition-options select {
+  min-height: 44px;
+  font: inherit;
+}
+
+.transition-options input[type='checkbox'] {
+  width: 24px;
+  height: 24px;
+}

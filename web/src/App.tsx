@@ -215,7 +215,7 @@ export function App(): JSX.Element {
       <h1>Astrofrags Web</h1>
       <p className="tagline">Trim a clip right in your browser. Nothing is uploaded.</p>
 
-      <FilePicker label={session ? 'Pick a different video' : 'Pick a video'} onPick={handlePick} />
+      <FilePicker label={session ? 'Pick a different video' : 'Pick a video'} onPick={(files) => handlePick(files[0])} />
 
       {session && sizeWarning && (
         <Notice
