@@ -17,7 +17,10 @@ const CUSTOM: BrandingSettings = {
   lowerThirdEnabled: true,
   lowerThirdText: 'Ace on Bank',
   watermarkCorner: 'top-left',
-  exportFormat: 'vertical-crop'
+  exportFormat: 'vertical-crop',
+  transitionsEnabled: true,
+  transitionStyle: 'wipeleft',
+  transitionSeconds: 1.5
 }
 
 test('defaults match the desktop app', () => {
@@ -30,7 +33,10 @@ test('defaults match the desktop app', () => {
     lowerThirdEnabled: false,
     lowerThirdText: '',
     watermarkCorner: 'bottom-right',
-    exportFormat: 'original'
+    exportFormat: 'original',
+    transitionsEnabled: false,
+    transitionStyle: 'fade',
+    transitionSeconds: 0.75
   })
 })
 
@@ -121,4 +127,16 @@ test('a stored export format that is not one of the four falls back on its own',
   assert.equal(parsed.exportFormat, 'original')
   assert.equal(parsed.displayName, 'Rey')
   assert.equal(parseBrandingSettings(JSON.stringify({ exportFormat: 'square' })).exportFormat, 'square')
+})
+
+test('stored transition fields fall back on their own', () => {
+  const parsed = (fields: object) => parseBrandingSettings(JSON.stringify({ displayName: 'Rey', ...fields }))
+  assert.equal(parsed({ transitionStyle: 'spin' }).transitionStyle, 'fade')
+  assert.equal(parsed({ transitionSeconds: 99 }).transitionSeconds, 2)
+  assert.equal(parsed({ transitionSeconds: -3 }).transitionSeconds, 0.1)
+  assert.equal(parsed({ transitionSeconds: 'x' }).transitionSeconds, 0.75)
+  assert.equal(parsed({ transitionSeconds: null }).transitionSeconds, 0.75)
+  assert.equal(parsed({ transitionsEnabled: 'yes' }).transitionsEnabled, false)
+  assert.equal(parsed({ transitionStyle: 'random' }).transitionStyle, 'random')
+  assert.equal(parsed({ transitionStyle: 'spin' }).displayName, 'Rey')
 })

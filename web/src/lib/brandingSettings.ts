@@ -1,5 +1,12 @@
 import { parseExportFormat } from './exportFormat.ts'
 import type { ExportFormat } from './exportFormat.ts'
+import {
+  DEFAULT_TRANSITION_SECONDS,
+  MAX_TRANSITION_SECONDS,
+  MIN_TRANSITION_SECONDS,
+  parseTransitionStyle
+} from './transitions.ts'
+import type { TransitionStyle } from './transitions.ts'
 
 export type WatermarkCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 
@@ -13,6 +20,9 @@ export interface BrandingSettings {
   readonly lowerThirdText: string
   readonly watermarkCorner: WatermarkCorner
   readonly exportFormat: ExportFormat
+  readonly transitionsEnabled: boolean
+  readonly transitionStyle: TransitionStyle
+  readonly transitionSeconds: number
 }
 
 export const BRANDING_STORAGE_KEY = 'astrofrags.branding.v1'
@@ -27,7 +37,10 @@ export const DEFAULT_BRANDING_SETTINGS: BrandingSettings = {
   lowerThirdEnabled: false,
   lowerThirdText: '',
   watermarkCorner: 'bottom-right',
-  exportFormat: 'original'
+  exportFormat: 'original',
+  transitionsEnabled: false,
+  transitionStyle: 'fade',
+  transitionSeconds: DEFAULT_TRANSITION_SECONDS
 }
 
 const CORNERS: readonly WatermarkCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
@@ -53,6 +66,11 @@ function cleanBoolean(value: unknown, fallback: boolean): boolean {
 function cleanDuration(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
   return Math.min(MAX_CARD_SECONDS, Math.max(MIN_CARD_SECONDS, value))
+}
+
+function cleanTransitionSeconds(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  return Math.min(MAX_TRANSITION_SECONDS, Math.max(MIN_TRANSITION_SECONDS, value))
 }
 
 function cleanCorner(value: unknown, fallback: WatermarkCorner): WatermarkCorner {
@@ -81,7 +99,10 @@ export function parseBrandingSettings(raw: string | null): BrandingSettings {
     lowerThirdEnabled: cleanBoolean(fields.lowerThirdEnabled, d.lowerThirdEnabled),
     lowerThirdText: cleanText(fields.lowerThirdText, MAX_LOWER_THIRD_LENGTH, d.lowerThirdText),
     watermarkCorner: cleanCorner(fields.watermarkCorner, d.watermarkCorner),
-    exportFormat: parseExportFormat(fields.exportFormat, d.exportFormat)
+    exportFormat: parseExportFormat(fields.exportFormat, d.exportFormat),
+    transitionsEnabled: cleanBoolean(fields.transitionsEnabled, d.transitionsEnabled),
+    transitionStyle: parseTransitionStyle(fields.transitionStyle, d.transitionStyle),
+    transitionSeconds: cleanTransitionSeconds(fields.transitionSeconds, d.transitionSeconds)
   }
 }
 
