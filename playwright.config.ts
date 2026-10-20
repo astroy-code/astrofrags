@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const PORT = 4317
+// Served under a repo subpath, the way GitHub Pages serves the site.
+const SITE_URL = `http://localhost:${PORT}/astrofrags/`
 
 export default defineConfig({
   testDir: 'web/e2e',
@@ -11,13 +13,13 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   use: {
-    baseURL: `http://localhost:${PORT}/`,
+    baseURL: SITE_URL,
     acceptDownloads: true
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: `npm run web:build && npx vite preview --config web/vite.config.ts --port ${PORT} --strictPort`,
-    url: `http://localhost:${PORT}/`,
+    command: `npm run web:build && npx vite preview --config web/vite.config.ts --base /astrofrags/ --port ${PORT} --strictPort`,
+    url: SITE_URL,
     reuseExistingServer: false,
     timeout: 180_000
   }

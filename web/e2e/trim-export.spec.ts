@@ -48,7 +48,7 @@ async function setRange(page: Page, testId: string, value: number): Promise<void
 }
 
 async function pickAndWaitReady(page: Page, fileName: string): Promise<void> {
-  await page.goto('/')
+  await page.goto('./')
   await page.getByTestId('file-input').setInputFiles(fixture(fileName))
   await expect(page.getByTestId('export-button')).toBeEnabled()
 }
@@ -127,11 +127,77 @@ test('cancel returns to ready and a second export works', async ({ page }) => {
   expect(probe(savedPath).videoCodec).toBe('h264')
 })
 
+/** Holds the first ffmpeg core download so the engine is still loading when the test acts. */
+async function delayFirstCoreLoad(page: Page, delayMs: number): Promise<void> {
+  let requests = 0
+  await page.route('**/ffmpeg-core.wasm', async (route) => {
+    requests += 1
+    if (requests === 1) await new Promise((resolve) => setTimeout(resolve, delayMs))
+    await route.continue()
+  })
+}
+
+test('cancel is honored immediately while the engine is still loading', async ({ page }) => {
+  await delayFirstCoreLoad(page, 6000)
+  const downloads: string[] = []
+  page.on('download', (download) => downloads.push(download.suggestedFilename()))
+
+  await page.goto('./')
+  await page.getByTestId('file-input').setInputFiles(fixture(FIXTURE_NAMES.clip))
+  await expect(page.getByTestId('export-button')).toBeEnabled()
+  await page.getByTestId('export-button').click()
+  await page.getByTestId('cancel-button').click()
+
+  // The engine load takes 6 s; the UI must not wait for it.
+  await expect(page.getByTestId('export-button')).toBeEnabled({ timeout: 2000 })
+  await page.waitForTimeout(9000)
+  await expect(page.getByTestId('export-status')).toBeHidden()
+  expect(downloads).toEqual([])
+})
+
+test('picking another video during an export cancels it', async ({ page }) => {
+  await delayFirstCoreLoad(page, 4000)
+  const downloads: string[] = []
+  page.on('download', (download) => downloads.push(download.suggestedFilename()))
+
+  await page.goto('./')
+  await page.getByTestId('file-input').setInputFiles(fixture(FIXTURE_NAMES.clip))
+  await expect(page.getByTestId('export-button')).toBeEnabled()
+  await page.getByTestId('export-button').click()
+  await page.getByTestId('file-input').setInputFiles(fixture(FIXTURE_NAMES.silent))
+
+  await page.waitForTimeout(9000)
+  // The first video's export must neither be delivered nor reported as done under the new video.
+  expect(downloads).toEqual([])
+  await expect(page.getByTestId('export-status')).toBeHidden()
+  await expect(page.getByTestId('export-button')).toBeEnabled()
+})
+
 test.describe('on a phone', () => {
   test.use({ userAgent: IPHONE_UA, hasTouch: true })
 
+  test('waits for a tap before saving the exported clip', async ({ page }) => {
+    // No Web Share in this browser, so the tap falls back to a normal download.
+    await page.addInitScript(() => Object.defineProperty(navigator, 'share', { value: undefined }))
+    const downloads: string[] = []
+    page.on('download', (download) => downloads.push(download.suggestedFilename()))
+
+    await pickAndWaitReady(page, FIXTURE_NAMES.clip)
+    await setRange(page, 'end-slider', 2)
+    await page.getByTestId('export-button').click()
+
+    await expect(page.getByTestId('deliver-button')).toBeVisible({ timeout: 20_000 })
+    expect(downloads).toEqual([])
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByTestId('deliver-button').click()
+    ])
+    expect(download.suggestedFilename()).toMatch(/-trim-\d+s-\d+s\.mp4$/)
+  })
+
   test('warns but does not block an over-limit file', async ({ page }) => {
-    await page.goto('/?softLimitBytes=1000')
+    await page.goto('./?softLimitBytes=1000')
     await page.getByTestId('file-input').setInputFiles(fixture(FIXTURE_NAMES.clip))
 
     const warning = page.getByTestId('notice').filter({ hasText: 'large for a phone browser' })
@@ -145,7 +211,7 @@ test.describe('on a phone', () => {
 })
 
 test('shows the undecodable message when the video cannot be decoded', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('./')
   await page.getByTestId('file-input').setInputFiles(fixture(FIXTURE_NAMES.audioOnly))
 
   await expect(page.getByTestId('notice').filter({ hasText: 'desktop app' })).toBeVisible()

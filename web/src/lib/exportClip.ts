@@ -83,47 +83,55 @@ export async function exportTrimmedClip(req: ExportRequest): Promise<ExportResul
   }
   if (req.signal?.aborted) throw new ExportCancelledError()
 
-  return runExclusive(async () => {
+  // Registered before any waiting (queue, engine load, encode) so Cancel works at every stage:
+  // resetFFmpeg() terminates the engine, which rejects whatever is pending.
+  const onAbort = (): void => resetFFmpeg()
+  req.signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    return await runExclusive(() => runExport(req))
+  } catch (error) {
     if (req.signal?.aborted) throw new ExportCancelledError()
-    const ffmpeg = await getFFmpeg()
+    throw error
+  } finally {
+    req.signal?.removeEventListener('abort', onAbort)
+  }
+}
 
-    let log = ''
-    const onLog = ({ message }: { message: string }): void => {
-      log = `${log}${message}\n`.slice(-LOG_TAIL_CHARS * 4)
-    }
-    const onProgress = ({ progress }: { progress: number }): void => {
-      req.onProgress(Math.min(1, Math.max(0, progress)))
-    }
-    const onAbort = (): void => resetFFmpeg()
+async function runExport(req: ExportRequest): Promise<ExportResult> {
+  if (req.signal?.aborted) throw new ExportCancelledError()
+  const ffmpeg = await getFFmpeg()
+  if (req.signal?.aborted) throw new ExportCancelledError()
 
-    ffmpeg.on('log', onLog)
-    ffmpeg.on('progress', onProgress)
-    req.signal?.addEventListener('abort', onAbort, { once: true })
-    try {
-      const exitCode = await withMountedFile(ffmpeg, req.file, (inputPath) =>
-        ffmpeg.exec(buildTrimArgs({ inputPath, outputPath: OUTPUT_NAME, start: req.start, end: req.end }))
-      )
-      if (exitCode !== 0) {
-        throw new Error(`ffmpeg failed (exit ${exitCode}): ${log.slice(-LOG_TAIL_CHARS)}`)
-      }
+  let log = ''
+  const onLog = ({ message }: { message: string }): void => {
+    log = `${log}${message}\n`.slice(-LOG_TAIL_CHARS * 4)
+  }
+  const onProgress = ({ progress }: { progress: number }): void => {
+    req.onProgress(Math.min(1, Math.max(0, progress)))
+  }
 
-      const data = await ffmpeg.readFile(OUTPUT_NAME)
-      if (typeof data === 'string' || data.length === 0) {
-        throw new Error('Export produced an empty file. The video may be in a format this browser cannot process.')
-      }
-      await ffmpeg.deleteFile(OUTPUT_NAME).catch(() => undefined)
-      return {
-        blob: new Blob([data.slice()], { type: 'video/mp4' }),
-        fileName: trimmedFileName(req.file.name, req.start, req.end)
-      }
-    } catch (error) {
-      if (req.signal?.aborted) throw new ExportCancelledError()
-      throw error
-    } finally {
-      req.signal?.removeEventListener('abort', onAbort)
-      // After a cancel the instance was terminated; these calls are harmless no-ops on it.
-      ffmpeg.off('log', onLog)
-      ffmpeg.off('progress', onProgress)
+  ffmpeg.on('log', onLog)
+  ffmpeg.on('progress', onProgress)
+  try {
+    const exitCode = await withMountedFile(ffmpeg, req.file, (inputPath) =>
+      ffmpeg.exec(buildTrimArgs({ inputPath, outputPath: OUTPUT_NAME, start: req.start, end: req.end }))
+    )
+    if (exitCode !== 0) {
+      throw new Error(`ffmpeg failed (exit ${exitCode}): ${log.slice(-LOG_TAIL_CHARS)}`)
     }
-  })
+
+    const data = await ffmpeg.readFile(OUTPUT_NAME)
+    if (typeof data === 'string' || data.length === 0) {
+      throw new Error('Export produced an empty file. The video may be in a format this browser cannot process.')
+    }
+    await ffmpeg.deleteFile(OUTPUT_NAME).catch(() => undefined)
+    return {
+      blob: new Blob([data.slice()], { type: 'video/mp4' }),
+      fileName: trimmedFileName(req.file.name, req.start, req.end)
+    }
+  } finally {
+    // After a cancel the instance was terminated; these calls are harmless no-ops on it.
+    ffmpeg.off('log', onLog)
+    ffmpeg.off('progress', onProgress)
+  }
 }

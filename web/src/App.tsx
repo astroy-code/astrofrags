@@ -6,6 +6,7 @@ import { Notice } from './components/Notice.tsx'
 import { TrimPlayer } from './components/TrimPlayer.tsx'
 import type { VideoMetadata } from './components/TrimPlayer.tsx'
 import { deliverClip } from './lib/deliverClip.ts'
+import { shouldAutoDeliver } from './lib/deliveryPolicy.ts'
 import { ExportCancelledError, exportTrimmedClip, probeAudioStreams } from './lib/exportClip.ts'
 import { isPreviewUndecodable, UNDECODABLE_MESSAGE } from './lib/previewSupport.ts'
 import { checkFileSize, detectPlatform, parseLimitOverride, SOFT_LIMIT_BYTES } from './lib/sizeLimit.ts'
@@ -69,6 +70,8 @@ export function App(): JSX.Element {
   }, [objectUrl])
 
   const handlePick = useCallback((file: File) => {
+    // A running export belongs to the previous video; it must not finish into the new one.
+    abortRef.current?.abort()
     exportedRef.current = null
     setExportState(IDLE)
     setSession(newSession(file))
@@ -97,16 +100,18 @@ export function App(): JSX.Element {
         signal: controller.signal
       })
       exportedRef.current = clip
-      const delivery = await deliverClip(clip.blob, clip.fileName, platform)
+      const delivery = shouldAutoDeliver(platform) ? await deliverClip(clip.blob, clip.fileName, platform) : 'pending'
       setExportState({ phase: 'done', fileName: clip.fileName, delivery })
     } catch (error) {
+      // A superseded export (the user picked another video) must not overwrite newer state.
+      if (abortRef.current !== controller) return
       if (error instanceof ExportCancelledError) {
         setExportState(IDLE)
       } else {
         setExportState({ phase: 'error', message: error instanceof Error ? error.message : 'Unknown error' })
       }
     } finally {
-      abortRef.current = null
+      if (abortRef.current === controller) abortRef.current = null
     }
   }, [session, platform])
 
@@ -118,6 +123,7 @@ export function App(): JSX.Element {
   }, [platform])
 
   const handleTrimAnother = useCallback(() => {
+    abortRef.current?.abort()
     exportedRef.current = null
     setExportState(IDLE)
     setSession(null)
@@ -172,7 +178,7 @@ export function App(): JSX.Element {
           state={exportState}
           onExport={() => void handleExport()}
           onCancel={() => abortRef.current?.abort()}
-          onDeliverAgain={() => void handleDeliverAgain()}
+          onDeliver={() => void handleDeliverAgain()}
           onTrimAnother={handleTrimAnother}
         />
       )}

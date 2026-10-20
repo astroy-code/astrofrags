@@ -3,7 +3,7 @@ import type { DeliveryResult } from '../lib/deliverClip.ts'
 export type ExportState =
   | { readonly phase: 'idle' }
   | { readonly phase: 'running'; readonly progress: number }
-  | { readonly phase: 'done'; readonly fileName: string; readonly delivery: DeliveryResult }
+  | { readonly phase: 'done'; readonly fileName: string; readonly delivery: DeliveryResult | 'pending' }
   | { readonly phase: 'error'; readonly message: string }
 
 interface ExportBarProps {
@@ -11,11 +11,12 @@ interface ExportBarProps {
   readonly state: ExportState
   readonly onExport: () => void
   readonly onCancel: () => void
-  readonly onDeliverAgain: () => void
+  readonly onDeliver: () => void
   readonly onTrimAnother: () => void
 }
 
-const DELIVERY_TEXT: Record<DeliveryResult, string> = {
+const DELIVERY_TEXT: Record<DeliveryResult | 'pending', string> = {
+  pending: 'Ready',
   shared: 'Shared',
   downloaded: 'Saved',
   cancelled: 'Not saved yet'
@@ -26,7 +27,7 @@ export function ExportBar({
   state,
   onExport,
   onCancel,
-  onDeliverAgain,
+  onDeliver,
   onTrimAnother
 }: ExportBarProps): JSX.Element {
   if (state.phase === 'running') {
@@ -57,9 +58,15 @@ export function ExportBar({
           <p>
             {DELIVERY_TEXT[state.delivery]}: {state.fileName}
           </p>
-          <button type="button" onClick={onDeliverAgain}>
-            Save again
-          </button>{' '}
+          {state.delivery === 'pending' ? (
+            <button type="button" className="primary" data-testid="deliver-button" onClick={onDeliver}>
+              Save or share clip
+            </button>
+          ) : (
+            <button type="button" onClick={onDeliver}>
+              Save again
+            </button>
+          )}{' '}
           <button type="button" onClick={onTrimAnother}>
             Trim another
           </button>
