@@ -3,6 +3,9 @@ out
 dist
 dist-web
 web/public/ffmpeg/
+web/e2e/.fixtures/
+test-results/
+playwright-report/
 *.log
 *.tsbuildinfo
 eng.traineddata

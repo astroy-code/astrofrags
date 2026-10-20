@@ -1,0 +1,31 @@
+import { execFileSync } from 'node:child_process'
+import { copyFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const ffmpegPath = require('ffmpeg-static')
+
+// Shared with the spec through JSON because the spec is loaded as CommonJS.
+export const FIXTURE_NAMES = JSON.parse(readFileSync(new URL('./names.json', import.meta.url), 'utf8'))
+
+function ffmpeg(args) {
+  execFileSync(ffmpegPath, ['-y', '-loglevel', 'error', ...args], { stdio: 'inherit' })
+}
+
+const VIDEO_SOURCE = ['-f', 'lavfi', '-i', 'testsrc=duration=6:size=640x360:rate=30']
+const AUDIO_SOURCE = ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=6']
+// VP9 because Playwright's bundled Chromium cannot play H.264.
+const VP9 = ['-c:v', 'libvpx-vp9', '-b:v', '300k', '-deadline', 'realtime', '-cpu-used', '8']
+
+/** Generates the E2E input clips into outDir (git-ignored scratch space). */
+export function makeFixtures(outDir) {
+  mkdirSync(outDir, { recursive: true })
+  const clip = join(outDir, FIXTURE_NAMES.clip)
+
+  ffmpeg([...VIDEO_SOURCE, ...AUDIO_SOURCE, ...VP9, '-c:a', 'libopus', '-shortest', clip])
+  ffmpeg([...VIDEO_SOURCE, ...VP9, join(outDir, FIXTURE_NAMES.silent)])
+  copyFileSync(clip, join(outDir, FIXTURE_NAMES.awkward))
+  // An MP4 with only an audio track: metadata loads but there are no video dimensions.
+  ffmpeg([...AUDIO_SOURCE, '-c:a', 'aac', join(outDir, FIXTURE_NAMES.audioOnly)])
+}

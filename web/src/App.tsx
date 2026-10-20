@@ -8,7 +8,7 @@ import type { VideoMetadata } from './components/TrimPlayer.tsx'
 import { deliverClip } from './lib/deliverClip.ts'
 import { ExportCancelledError, exportTrimmedClip, probeAudioStreams } from './lib/exportClip.ts'
 import { isPreviewUndecodable, UNDECODABLE_MESSAGE } from './lib/previewSupport.ts'
-import { checkFileSize, detectPlatform } from './lib/sizeLimit.ts'
+import { checkFileSize, detectPlatform, parseLimitOverride, SOFT_LIMIT_BYTES } from './lib/sizeLimit.ts'
 import { validateTrimRange } from './lib/trimRange.ts'
 import type { TrimRange } from './lib/trimRange.ts'
 
@@ -56,6 +56,7 @@ function applyMetadata(session: Session, metadata: VideoMetadata): Session {
 
 export function App(): JSX.Element {
   const platform = useMemo(() => detectPlatform(navigator.userAgent, navigator.maxTouchPoints), [])
+  const limits = useMemo(() => parseLimitOverride(window.location.search) ?? SOFT_LIMIT_BYTES, [])
   const [session, setSession] = useState<Session | null>(null)
   const [exportState, setExportState] = useState<ExportState>(IDLE)
   const abortRef = useRef<AbortController | null>(null)
@@ -125,7 +126,7 @@ export function App(): JSX.Element {
   const canExport =
     session !== null && !session.previewBroken && validateTrimRange(session.range, session.duration).ok
   const sizeWarning =
-    session !== null && !session.sizeWarningDismissed && checkFileSize(session.file.size, platform) === 'warn'
+    session !== null && !session.sizeWarningDismissed && checkFileSize(session.file.size, platform, limits) === 'warn'
 
   return (
     <main className="app">

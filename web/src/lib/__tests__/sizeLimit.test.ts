@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkFileSize, detectPlatform, SOFT_LIMIT_BYTES } from '../sizeLimit.ts'
+import { checkFileSize, detectPlatform, parseLimitOverride, SOFT_LIMIT_BYTES } from '../sizeLimit.ts'
 import type { Platform } from '../sizeLimit.ts'
 
 const IPHONE_UA =
@@ -40,4 +40,19 @@ test('detects an iPad reporting a Macintosh user agent as mobile', () => {
 test('detects a Mac without touch and Windows Chrome as desktop', () => {
   assert.equal(detectPlatform(MAC_UA, 0), 'desktop')
   assert.equal(detectPlatform(WINDOWS_UA, 0), 'desktop')
+})
+
+test('an explicit limits override replaces the default soft limits', () => {
+  const limits = { desktop: 1000, mobile: 100 }
+  assert.equal(checkFileSize(101, 'mobile', limits), 'warn')
+  assert.equal(checkFileSize(100, 'mobile', limits), 'ok')
+  assert.equal(checkFileSize(1001, 'desktop', limits), 'warn')
+})
+
+test('parseLimitOverride reads a positive byte count and ignores junk', () => {
+  assert.deepEqual(parseLimitOverride('?softLimitBytes=2048'), { desktop: 2048, mobile: 2048 })
+  assert.equal(parseLimitOverride(''), null)
+  assert.equal(parseLimitOverride('?softLimitBytes=abc'), null)
+  assert.equal(parseLimitOverride('?softLimitBytes=-5'), null)
+  assert.equal(parseLimitOverride('?softLimitBytes=0'), null)
 })

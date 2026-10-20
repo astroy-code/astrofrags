@@ -9,8 +9,22 @@ export const SOFT_LIMIT_BYTES: Record<Platform, number> = {
   mobile: 200 * MEGABYTE
 }
 
-export function checkFileSize(bytes: number, platform: Platform): 'ok' | 'warn' {
-  return bytes > SOFT_LIMIT_BYTES[platform] ? 'warn' : 'ok'
+export function checkFileSize(
+  bytes: number,
+  platform: Platform,
+  limits: Record<Platform, number> = SOFT_LIMIT_BYTES
+): 'ok' | 'warn' {
+  return bytes > limits[platform] ? 'warn' : 'ok'
+}
+
+/**
+ * Reads `?softLimitBytes=N` from a query string so the warning path can be exercised with a
+ * tiny file (used by the E2E tests). Anything that isn't a positive number is ignored.
+ */
+export function parseLimitOverride(search: string): Record<Platform, number> | null {
+  const raw = new URLSearchParams(search).get('softLimitBytes')
+  const bytes = raw === null ? NaN : Number(raw)
+  return Number.isFinite(bytes) && bytes > 0 ? { desktop: bytes, mobile: bytes } : null
 }
 
 export function detectPlatform(userAgent: string, maxTouchPoints: number): Platform {
