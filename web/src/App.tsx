@@ -136,14 +136,18 @@ export function App(): JSX.Element {
     setExportState({ phase: 'running', progress: 0 })
     try {
       const clip = await exportTrimmedClip({
-        file: session.file,
-        start: session.range.start,
-        end: session.range.end,
-        duration: session.duration,
-        audioTrackIndex: selectedTrack(session),
+        clips: [
+          {
+            file: session.file,
+            start: session.range.start,
+            end: session.range.end,
+            duration: session.duration,
+            audioTrackIndex: selectedTrack(session),
+            sourceSize: session.videoSize
+          }
+        ],
         branding,
         musicFile: session.musicFile,
-        sourceSize: session.videoSize,
         onProgress: (progress) =>
           setExportState((current) => (current.phase === 'running' ? { phase: 'running', progress } : current)),
         signal: controller.signal

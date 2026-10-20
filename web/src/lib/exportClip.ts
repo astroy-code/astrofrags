@@ -9,15 +9,15 @@ import { buildExportArgs, planDurationSeconds } from './exportGraph.ts'
 import type { ExportInputs, ExportPlan } from './exportGraph.ts'
 import { buildLevelProbeArgs } from './ffmpegArgs.ts'
 import { countAudioStreams } from './ffmpegLog.ts'
-import { trimmedFileName } from './fileNames.ts'
-import { formatOutputSize } from './exportFormat.ts'
-import type { Size } from './outputGeometry.ts'
+import { reelFileName, trimmedFileName } from './fileNames.ts'
 import { progressRatio } from './progress.ts'
+import { buildExportPlan } from './reelPlan.ts'
+import type { ReelClip } from './reelPlan.ts'
 import { validateTrimRange } from './trimRange.ts'
 import { getFFmpeg, resetFFmpeg, runExclusive } from './ffmpegInstance.ts'
 
 const MOUNT_DIR = '/in'
-const INPUT_NAME = 'input'
+const INPUT_PREFIX = 'input'
 const MUSIC_NAME = 'music'
 const OUTPUT_NAME = 'output.mp4'
 const LOGO_FILE = 'logo.png'
@@ -35,17 +35,16 @@ export class ExportCancelledError extends Error {
   }
 }
 
-export interface ExportRequest {
+/** A clip of the reel together with the picked file it is cut from. */
+export interface ExportClip extends ReelClip {
   readonly file: File
-  readonly start: number
-  readonly end: number
-  readonly duration: number
-  /** Zero-based audio stream to use; null when the video has no audio. */
-  readonly audioTrackIndex: number | null
+}
+
+export interface ExportRequest {
+  /** The clips in order; one clip is a plain trim. */
+  readonly clips: readonly ExportClip[]
   readonly branding: BrandingSettings
   readonly musicFile: File | null
-  /** The video's displayed size, from the preview element. */
-  readonly sourceSize: Size
   readonly onProgress: (ratio: number) => void
   readonly signal?: AbortSignal
 }
@@ -77,7 +76,7 @@ async function withMountedFiles<T>(
 }
 
 function withMountedFile<T>(ffmpeg: FFmpeg, file: File, run: (inputPath: string) => Promise<T>): Promise<T> {
-  return withMountedFiles(ffmpeg, [{ name: INPUT_NAME, file }], ([inputPath]) => run(inputPath))
+  return withMountedFiles(ffmpeg, [{ name: INPUT_PREFIX + '0', file }], ([inputPath]) => run(inputPath))
 }
 
 /** `-i` with no output exits non-zero but prints the stream listing, which is all we need. */
@@ -150,10 +149,13 @@ export async function probeAudioTracks(file: File): Promise<AudioProbe> {
 }
 
 export async function exportTrimmedClip(req: ExportRequest): Promise<ExportResult> {
-  const validation = validateTrimRange({ start: req.start, end: req.end }, req.duration)
-  if (!validation.ok) {
-    throw new Error(`Invalid trim range (${validation.reason}).`)
-  }
+  if (req.clips.length === 0) throw new Error('Add at least one clip to export.')
+  req.clips.forEach((clip, index) => {
+    const validation = validateTrimRange({ start: clip.start, end: clip.end }, clip.duration)
+    if (!validation.ok) {
+      throw new Error(`Invalid trim range in clip ${index + 1} (${validation.reason}).`)
+    }
+  })
   if (req.signal?.aborted) throw new ExportCancelledError()
 
   // Registered before any waiting (queue, engine load, encode) so Cancel works at every stage:
@@ -167,23 +169,6 @@ export async function exportTrimmedClip(req: ExportRequest): Promise<ExportResul
     throw error
   } finally {
     req.signal?.removeEventListener('abort', onAbort)
-  }
-}
-
-function buildPlan(req: ExportRequest, logo: Logo): ExportPlan {
-  const { branding } = req
-  return {
-    clips: [{ start: req.start, end: req.end, audioTrackIndex: req.audioTrackIndex }],
-    transition: null,
-    output: formatOutputSize(branding.exportFormat, req.sourceSize),
-    logo: logo.size,
-    watermarkCorner: branding.watermarkCorner,
-    format: branding.exportFormat,
-    intro: branding.introEnabled,
-    outro: branding.outroEnabled,
-    cardSeconds: branding.cardDurationSeconds,
-    music: req.musicFile !== null,
-    lowerThird: branding.lowerThirdEnabled
   }
 }
 
@@ -218,13 +203,25 @@ async function writeBrandingFiles(
   return inputs
 }
 
+function resultFileName({ clips }: ExportRequest): string {
+  const [first] = clips
+  return clips.length === 1
+    ? trimmedFileName(first.file.name, first.start, first.end)
+    : reelFileName(first.file.name, clips.length)
+}
+
 async function runExport(req: ExportRequest): Promise<ExportResult> {
   if (req.signal?.aborted) throw new ExportCancelledError()
   const logo = await loadLogo()
   const ffmpeg = await getFFmpeg()
   if (req.signal?.aborted) throw new ExportCancelledError()
 
-  const plan = buildPlan(req, logo)
+  const plan = buildExportPlan({
+    clips: req.clips,
+    branding: req.branding,
+    hasMusic: req.musicFile !== null,
+    logo: logo.size
+  })
   const planSeconds = planDurationSeconds(plan)
 
   let log = ''
@@ -242,11 +239,17 @@ async function runExport(req: ExportRequest): Promise<ExportResult> {
   try {
     const brandingInputs = await writeBrandingFiles(ffmpeg, plan, req.branding, logo, written)
     const mounts = [
-      { name: INPUT_NAME, file: req.file },
+      ...req.clips.map((clip, index) => ({ name: `${INPUT_PREFIX}${index}`, file: clip.file })),
       ...(req.musicFile ? [{ name: MUSIC_NAME, file: req.musicFile }] : [])
     ]
-    const exitCode = await withMountedFiles(ffmpeg, mounts, ([video, music]) =>
-      ffmpeg.exec(buildExportArgs(plan, { ...brandingInputs, videos: [video], music }, OUTPUT_NAME))
+    const exitCode = await withMountedFiles(ffmpeg, mounts, (paths) =>
+      ffmpeg.exec(
+        buildExportArgs(
+          plan,
+          { ...brandingInputs, videos: paths.slice(0, req.clips.length), music: paths[req.clips.length] },
+          OUTPUT_NAME
+        )
+      )
     )
     if (exitCode !== 0) {
       throw new Error(`ffmpeg failed (exit ${exitCode}): ${log.slice(-LOG_TAIL_CHARS)}`)
@@ -258,7 +261,7 @@ async function runExport(req: ExportRequest): Promise<ExportResult> {
     }
     return {
       blob: new Blob([data.slice()], { type: 'video/mp4' }),
-      fileName: trimmedFileName(req.file.name, req.start, req.end)
+      fileName: resultFileName(req)
     }
   } finally {
     // After a cancel the instance was terminated; these calls are harmless no-ops on it.
