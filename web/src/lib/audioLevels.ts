@@ -35,6 +35,24 @@ export function pickLoudestTrack(levels: readonly TrackLevel[]): number {
   return levels.length === 0 || isSilent(levels[loudest]) ? 0 : loudest
 }
 
+export interface AudioChoiceInput {
+  /** Audio streams in the file; null when the stream listing itself could not be read. */
+  readonly trackCount: number | null
+  readonly levels: readonly TrackLevel[]
+  /** The user's explicit pick; null means "use the loudest". */
+  readonly override: number | null
+}
+
+/**
+ * The audio stream to export, or null only when the file is known to have none. An unreadable
+ * listing is not evidence of silence: keep the first track rather than drop the sound.
+ */
+export function chooseAudioTrack({ trackCount, levels, override }: AudioChoiceInput): number | null {
+  if (trackCount === 0) return null
+  if (trackCount === null) return override ?? 0
+  return override ?? pickLoudestTrack(levels)
+}
+
 /** Maps -60 dBFS..0 dBFS onto 0..100 for a level meter. */
 export function levelToPercent(level: TrackLevel): number {
   if (level.rms <= 0) return 0

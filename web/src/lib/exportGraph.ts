@@ -176,25 +176,24 @@ export function buildExportArgs(plan: ExportPlan, inputs: ExportInputs, outputPa
     audioLabel = carded.audioLabel
   }
 
-  // The logo is a still image: loop it, bounded by the plan duration, and let overlay end with
-  // the video (shortest=1) or the render would never stop.
-  const total = seconds(planDurationSeconds(plan))
-  const logoIndex = addInput(['-loop', '1', '-t', total, '-i', inputs.logo])
+  // The logo is a still image read once: overlay repeats its last frame until the video ends.
+  // (Looping it would re-decode the PNG for every output frame.)
+  const logoIndex = addInput(['-i', inputs.logo])
   const mark = watermarkRect(plan.watermarkCorner, plan.output, plan.logo)
   const watermarkOut = plan.lowerThird ? '[watermarked]' : '[outv]'
   stages.push(
     `[${logoIndex}:v]scale=${mark.width}:${mark.height}[wm_logo]`,
-    `${videoLabel}[wm_logo]overlay=${mark.x}:${mark.y}:shortest=1${watermarkOut}`
+    `${videoLabel}[wm_logo]overlay=${mark.x}:${mark.y}${watermarkOut}`
   )
 
   // The lower-third is a full-canvas transparent PNG, drawn last so it sits on top of the
   // watermark (as on desktop) and spans the whole output, cards included.
   if (plan.lowerThird) {
     if (!inputs.lowerThird) throw new Error('The lower-third image is missing.')
-    const lowerThirdIndex = addInput(['-loop', '1', '-t', total, '-i', inputs.lowerThird])
+    const lowerThirdIndex = addInput(['-i', inputs.lowerThird])
     stages.push(
       `[${lowerThirdIndex}:v]format=rgba[lower_third]`,
-      '[watermarked][lower_third]overlay=0:0:shortest=1[outv]'
+      '[watermarked][lower_third]overlay=0:0[outv]'
     )
   }
 

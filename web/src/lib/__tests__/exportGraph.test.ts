@@ -30,9 +30,14 @@ test('places the clip with input-side -ss and -t', () => {
   assert.deepEqual(args.slice(0, 6), ['-ss', '1.500', '-t', '2.000', '-i', 'in.mp4'])
 })
 
-test('loops the logo for the whole plan duration', () => {
-  const args = buildExportArgs(PLAN, INPUTS, 'out.mp4')
-  assert.deepEqual(args.slice(6, 12), ['-loop', '1', '-t', '2.000', '-i', 'logo.png'])
+test('the logo and lower-third are read once, not looped: overlay holds the single frame', () => {
+  // Looping makes ffmpeg decode the PNG again for every output frame, which roughly doubles
+  // the export time for a full-frame lower-third.
+  const plan = { ...PLAN, lowerThird: true }
+  const args = buildExportArgs(plan, { ...INPUTS, lowerThird: 'lt.png' }, 'out.mp4')
+  assert.deepEqual(args.slice(6, 10), ['-i', 'logo.png', '-i', 'lt.png'])
+  assert.ok(!args.includes('-loop'))
+  assert.ok(!graphOf(args).includes('shortest'))
 })
 
 test('output encode settings are libx264 ultrafast crf 23 yuv420p aac faststart', () => {

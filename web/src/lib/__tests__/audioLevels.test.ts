@@ -1,8 +1,23 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isSilent, levelToPercent, measureLevel, pickLoudestTrack } from '../audioLevels.ts'
+import { chooseAudioTrack, isSilent, levelToPercent, measureLevel, pickLoudestTrack } from '../audioLevels.ts'
 
 const level = (rms: number) => ({ rms, peak: rms })
+
+test('chooseAudioTrack: a video the listing says has no audio gets none', () => {
+  assert.equal(chooseAudioTrack({ trackCount: 0, levels: [], override: null }), null)
+})
+
+test('chooseAudioTrack: a failed probe never turns into "no audio", it keeps the first track', () => {
+  assert.equal(chooseAudioTrack({ trackCount: null, levels: [], override: null }), 0)
+  assert.equal(chooseAudioTrack({ trackCount: null, levels: [], override: 1 }), 1)
+})
+
+test('chooseAudioTrack: otherwise the user choice, else the loudest track', () => {
+  const levels = [level(0), level(0.2)]
+  assert.equal(chooseAudioTrack({ trackCount: 2, levels, override: null }), 1)
+  assert.equal(chooseAudioTrack({ trackCount: 2, levels, override: 0 }), 0)
+})
 
 test('measureLevel reports zero for silence and for no samples', () => {
   assert.deepEqual(measureLevel(new Int16Array(100)), { rms: 0, peak: 0 })

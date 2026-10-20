@@ -9,7 +9,7 @@ import { FilePicker } from './components/FilePicker.tsx'
 import { Notice } from './components/Notice.tsx'
 import { TrimPlayer } from './components/TrimPlayer.tsx'
 import type { VideoMetadata } from './components/TrimPlayer.tsx'
-import { isSilent, pickLoudestTrack } from './lib/audioLevels.ts'
+import { chooseAudioTrack, isSilent } from './lib/audioLevels.ts'
 import type { TrackLevel } from './lib/audioLevels.ts'
 import { deliverClip } from './lib/deliverClip.ts'
 import { estimateExportSeconds } from './lib/estimate.ts'
@@ -30,6 +30,8 @@ interface Session {
   readonly range: TrimRange
   /** Loudness per audio track; empty until the probe finishes (or for a file with no audio). */
   readonly audioLevels: readonly TrackLevel[]
+  /** Audio streams in the file; null until known, or when the probe could not read the file. */
+  readonly audioTrackCount: number | null
   readonly audioProbeDone: boolean
   /** The user's explicit track choice; null means "use the loudest". */
   readonly audioTrackOverride: number | null
@@ -56,6 +58,7 @@ function newSession(file: File): Session {
     duration: 0,
     range: { start: 0, end: 0 },
     audioLevels: [],
+    audioTrackCount: null,
     audioProbeDone: false,
     audioTrackOverride: null,
     previewBroken: false,
@@ -67,8 +70,11 @@ function newSession(file: File): Session {
 
 /** The audio stream to export, or null when the video has none. */
 function selectedTrack(session: Session): number | null {
-  if (session.audioLevels.length === 0) return null
-  return session.audioTrackOverride ?? pickLoudestTrack(session.audioLevels)
+  return chooseAudioTrack({
+    trackCount: session.audioTrackCount,
+    levels: session.audioLevels,
+    override: session.audioTrackOverride
+  })
 }
 
 function applyMetadata(session: Session, metadata: VideoMetadata): Session {
@@ -109,9 +115,11 @@ export function App(): JSX.Element {
     exportedRef.current = null
     setExportState(IDLE)
     setSession(newSession(file))
-    void probeAudioTracks(file).then((audioLevels) =>
+    void probeAudioTracks(file).then(({ trackCount, levels }) =>
       setSession((current) =>
-        current && current.file === file ? { ...current, audioLevels, audioProbeDone: true } : current
+        current && current.file === file
+          ? { ...current, audioLevels: levels, audioTrackCount: trackCount, audioProbeDone: true }
+          : current
       )
     )
   }, [])

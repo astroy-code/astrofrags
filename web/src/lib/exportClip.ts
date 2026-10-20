@@ -120,11 +120,17 @@ async function measureTrack(ffmpeg: FFmpeg, inputPath: string, trackIndex: numbe
   }
 }
 
-/**
- * Best-effort loudness of every audio track, in track order. Resolves to [] on any failure
- * (or for a file with no audio) and never throws.
- */
-export async function probeAudioTracks(file: File): Promise<readonly TrackLevel[]> {
+export interface AudioProbe {
+  /** Audio streams in the file; null when the stream listing could not be read at all. */
+  readonly trackCount: number | null
+  /** Loudness per track; a track that could not be measured counts as silent. */
+  readonly levels: readonly TrackLevel[]
+}
+
+const SILENT_LEVEL: TrackLevel = { rms: 0, peak: 0 }
+
+/** Best-effort audio facts about a file. Never throws. */
+export async function probeAudioTracks(file: File): Promise<AudioProbe> {
   try {
     return await runExclusive(async () => {
       const ffmpeg = await getFFmpeg()
@@ -132,13 +138,14 @@ export async function probeAudioTracks(file: File): Promise<readonly TrackLevel[
         const trackCount = countAudioStreams(await readStreamListing(ffmpeg, inputPath))
         const levels: TrackLevel[] = []
         for (let trackIndex = 0; trackIndex < trackCount; trackIndex += 1) {
-          levels.push(await measureTrack(ffmpeg, inputPath, trackIndex))
+          // A track the probe chokes on still exists: keep it, as silent, so the stream count stays true.
+          levels.push(await measureTrack(ffmpeg, inputPath, trackIndex).catch(() => SILENT_LEVEL))
         }
-        return levels
+        return { trackCount, levels }
       })
     })
   } catch {
-    return []
+    return { trackCount: null, levels: [] }
   }
 }
 
