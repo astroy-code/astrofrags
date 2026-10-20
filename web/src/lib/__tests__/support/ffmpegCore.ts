@@ -125,7 +125,8 @@ export async function pixelAt(
     [
       '-ss', String(atSeconds), '-i', name,
       '-frames:v', '1',
-      '-vf', `crop=1:1:${x}:${y}`,
+      // Convert to RGB first: crop on subsampled YUV rounds a 1-pixel size down to zero.
+      '-vf', `format=rgb24,crop=1:1:${x}:${y}`,
       '-f', 'rawvideo', '-pix_fmt', 'rgb24',
       'pixel.rgb'
     ],
@@ -144,7 +145,8 @@ export interface FixtureOptions {
   readonly frequency?: number
 }
 
-export type FixtureKind = 'video' | 'videoNoAudio' | 'twoTrack' | 'tone' | 'png'
+/** `rawVideo` is an uncompressed AVI so odd dimensions (which x264 rejects) can be tested. */
+export type FixtureKind = 'video' | 'videoNoAudio' | 'twoTrack' | 'tone' | 'png' | 'rawVideo'
 
 const DEFAULT_WIDTH = 320
 const DEFAULT_HEIGHT = 180
@@ -169,6 +171,10 @@ export async function makeFixture(kind: FixtureKind, opts: FixtureOptions = {}):
       output: 'out.mp4'
     },
     videoNoAudio: { args: [...video, ...ENCODE, 'out.mp4'], output: 'out.mp4' },
+    rawVideo: {
+      args: [...video, '-c:v', 'rawvideo', '-pix_fmt', 'rgb24', 'out.avi'],
+      output: 'out.avi'
+    },
     twoTrack: {
       args: [
         ...video,
