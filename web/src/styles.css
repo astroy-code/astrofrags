@@ -1,4 +1,163 @@
+:root {
+  color-scheme: light dark;
+  --gutter: 16px;
+  --radius: 8px;
+  --accent: #5b6cff;
+  --warn-bg: #fff4d6;
+  --warn-fg: #5c4400;
+  --error-bg: #ffe1e1;
+  --error-fg: #7a1111;
+  --info-bg: #e3edff;
+  --info-fg: #17325f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --warn-bg: #4a3a0a;
+    --warn-fg: #ffe9a8;
+    --error-bg: #4d1717;
+    --error-fg: #ffc9c9;
+    --info-bg: #19305a;
+    --info-fg: #cfe0ff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family: system-ui, sans-serif;
+  line-height: 1.4;
+}
+
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--gutter);
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 1.5rem;
+}
+
+.tagline {
+  margin: 0 0 var(--gutter);
+  opacity: 0.75;
+}
+
+button,
+.button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.file-picker {
+  display: inline-block;
+  margin-bottom: var(--gutter);
+}
+
+.file-picker .button {
+  display: inline-flex;
+  align-items: center;
+}
+
+.file-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.notice {
+  margin: 0 0 var(--gutter);
+  padding: 12px var(--gutter);
+  border-radius: var(--radius);
+}
+
+.notice p {
+  margin: 0 0 8px;
+}
+
+.notice p:last-child {
+  margin-bottom: 0;
+}
+
+.notice-warn {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.notice-error {
+  background: var(--error-bg);
+  color: var(--error-fg);
+}
+
+.notice-info {
+  background: var(--info-bg);
+  color: var(--info-fg);
+}
+
+.trim-player video {
+  display: block;
+  width: 100%;
+  max-height: 60vh;
+  background: #000;
+  border-radius: var(--radius);
+}
+
+.trim-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px var(--gutter);
+  margin-top: var(--gutter);
+}
+
+.trim-row label {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trim-row input[type='range'] {
+  width: 100%;
+  min-height: 44px;
+}
+
+.trim-summary {
+  margin: var(--gutter) 0;
+  opacity: 0.75;
+}
+
+.export-bar {
+  margin-top: var(--gutter);
+}
+
+.export-bar progress {
+  width: 100%;
+}
+
+.error-text {
+  color: var(--error-fg);
 }

@@ -28,3 +28,15 @@ export function clampTrimRange(range: TrimRange, duration: number): TrimRange {
   const end = Math.min(Math.max(range.end, start), duration)
   return { start, end }
 }
+
+/** Moves the start handle, keeping at least MIN_TRIM_SECONDS before the end. */
+export function withStart(range: TrimRange, start: number, duration: number): TrimRange {
+  const latestStart = Math.max(0, range.end - MIN_TRIM_SECONDS)
+  return clampTrimRange({ start: Math.min(start, latestStart), end: range.end }, duration)
+}
+
+/** Moves the end handle, keeping at least MIN_TRIM_SECONDS after the start. */
+export function withEnd(range: TrimRange, end: number, duration: number): TrimRange {
+  const earliestEnd = Math.min(duration, range.start + MIN_TRIM_SECONDS)
+  return clampTrimRange({ start: range.start, end: Math.max(end, earliestEnd) }, duration)
+}
