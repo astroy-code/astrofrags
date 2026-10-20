@@ -1,0 +1,130 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  addClips,
+  createClip,
+  emptyReel,
+  moveClip,
+  removeClip,
+  selectClip,
+  selectedClip,
+  setMusic,
+  updateClip
+} from '../reel.ts'
+import type { Reel } from '../reel.ts'
+
+const file = (name: string): File => new File(['x'], name, { type: 'video/mp4' })
+const item = (name: string) => createClip(file(name), `blob:${name}`)
+const names = (reel: Reel): string[] => reel.clips.map((clip) => clip.file.name)
+
+/** Freezes a reel deeply enough that any in-place change throws. */
+function frozen(reel: Reel): Reel {
+  Object.freeze(reel.clips.map((clip) => Object.freeze(clip)))
+  return Object.freeze({ ...reel, clips: Object.freeze([...reel.clips]) })
+}
+
+const three = (): Reel => addClips(emptyReel(), [item('a'), item('b'), item('c')])
+
+test('a new clip starts unprobed with an empty range', () => {
+  const clip = item('a')
+  assert.equal(clip.audioProbeDone, false)
+  assert.equal(clip.audioTrackCount, null)
+  assert.deepEqual(clip.range, { start: 0, end: 0 })
+  assert.deepEqual(clip.videoSize, { width: 0, height: 0 })
+})
+
+test('adding clips gives unique ids, keeps order and selects the first one', () => {
+  const reel = three()
+  assert.deepEqual(names(reel), ['a', 'b', 'c'])
+  assert.equal(new Set(reel.clips.map((clip) => clip.id)).size, 3)
+  assert.equal(reel.selectedId, reel.clips[0].id)
+})
+
+test('adding more clips keeps the current selection', () => {
+  const reel = selectClip(three(), 2)
+  const more = addClips(reel, [item('d')])
+  assert.equal(more.selectedId, 2)
+  assert.deepEqual(names(more), ['a', 'b', 'c', 'd'])
+})
+
+test('the same file twice makes two items', () => {
+  const same = file('a')
+  const reel = addClips(emptyReel(), [createClip(same, 'blob:1'), createClip(same, 'blob:2')])
+  assert.equal(reel.clips.length, 2)
+  assert.notEqual(reel.clips[0].id, reel.clips[1].id)
+})
+
+test('ids are never reused after a removal', () => {
+  const reel = addClips(removeClip(three(), 2), [item('d')])
+  assert.equal(new Set(reel.clips.map((clip) => clip.id)).size, 3)
+  assert.ok(!reel.clips.slice(0, 2).some((clip) => clip.id === reel.clips[2].id))
+})
+
+test('removing the selected middle clip selects the one that moves into its place', () => {
+  const reel = removeClip(selectClip(three(), 2), 2)
+  assert.deepEqual(names(reel), ['a', 'c'])
+  assert.equal(selectedClip(reel)?.file.name, 'c')
+})
+
+test('removing the selected last clip selects the one before it', () => {
+  const reel = removeClip(selectClip(three(), 3), 3)
+  assert.equal(selectedClip(reel)?.file.name, 'b')
+})
+
+test('removing the only clip leaves an empty reel with nothing selected', () => {
+  const reel = removeClip(addClips(emptyReel(), [item('a')]), 1)
+  assert.deepEqual(reel.clips, [])
+  assert.equal(reel.selectedId, null)
+})
+
+test('removing an unselected clip keeps the selection; an unknown id changes nothing', () => {
+  const reel = removeClip(three(), 3)
+  assert.equal(reel.selectedId, 1)
+  assert.equal(removeClip(reel, 99), reel)
+})
+
+test('moving up and down reorders, and does nothing at the ends', () => {
+  const reel = three()
+  assert.deepEqual(names(moveClip(reel, 2, 'up')), ['b', 'a', 'c'])
+  assert.deepEqual(names(moveClip(reel, 2, 'down')), ['a', 'c', 'b'])
+  assert.equal(moveClip(reel, 1, 'up'), reel)
+  assert.equal(moveClip(reel, 3, 'down'), reel)
+  assert.equal(moveClip(reel, 99, 'up'), reel)
+})
+
+test('moving a clip keeps the selection on the same clip', () => {
+  const moved = moveClip(selectClip(three(), 2), 2, 'down')
+  assert.equal(selectedClip(moved)?.file.name, 'b')
+})
+
+test('updating a clip changes only that clip; a removed id is a no-op', () => {
+  const reel = three()
+  const updated = updateClip(reel, 2, { duration: 12, audioProbeDone: true })
+  assert.equal(updated.clips[1].duration, 12)
+  assert.equal(updated.clips[0].duration, 0)
+  const gone = removeClip(updated, 2)
+  assert.equal(updateClip(gone, 2, { duration: 99 }), gone)
+})
+
+test('selecting an unknown id changes nothing', () => {
+  const reel = three()
+  assert.equal(selectClip(reel, 99), reel)
+})
+
+test('music is set and cleared', () => {
+  const song = file('song.mp3')
+  assert.equal(setMusic(three(), song).musicFile, song)
+  assert.equal(setMusic(setMusic(three(), song), null).musicFile, null)
+})
+
+test('no reel function mutates its input', () => {
+  const reel = frozen(three())
+  assert.doesNotThrow(() => {
+    addClips(reel, [item('d')])
+    removeClip(reel, 2)
+    moveClip(reel, 2, 'up')
+    updateClip(reel, 1, { duration: 5 })
+    selectClip(reel, 3)
+    setMusic(reel, null)
+  })
+})

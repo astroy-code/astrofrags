@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkFileSize, detectPlatform, parseLimitOverride, SOFT_LIMIT_BYTES } from '../sizeLimit.ts'
+import { checkClipCount, checkFileSize, detectPlatform, parseLimitOverride, SOFT_LIMIT_BYTES } from '../sizeLimit.ts'
 import type { Platform } from '../sizeLimit.ts'
 
 const IPHONE_UA =
@@ -55,4 +55,12 @@ test('parseLimitOverride reads a positive byte count and ignores junk', () => {
   assert.equal(parseLimitOverride('?softLimitBytes=abc'), null)
   assert.equal(parseLimitOverride('?softLimitBytes=-5'), null)
   assert.equal(parseLimitOverride('?softLimitBytes=0'), null)
+})
+
+test('the clip-count warning starts above 6 on phones and above 12 on desktops', () => {
+  assert.equal(checkClipCount(6, 'mobile'), 'ok')
+  assert.equal(checkClipCount(7, 'mobile'), 'warn')
+  assert.equal(checkClipCount(12, 'desktop'), 'ok')
+  assert.equal(checkClipCount(13, 'desktop'), 'warn')
+  assert.equal(checkClipCount(0, 'mobile'), 'ok')
 })

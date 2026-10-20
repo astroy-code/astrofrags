@@ -33,3 +33,15 @@ export function detectPlatform(userAgent: string, maxTouchPoints: number): Platf
   if (/Macintosh/i.test(userAgent) && maxTouchPoints > 1) return 'mobile'
   return 'desktop'
 }
+
+// Soft limits like the file-size ones: above these the page warns but never blocks. Every clip
+// is decoded in one browser tab, so memory and time grow with the clip count. Starting guesses
+// to tune on real devices.
+export const CLIP_COUNT_WARN_ABOVE: Record<Platform, number> = {
+  desktop: 12,
+  mobile: 6
+}
+
+export function checkClipCount(count: number, platform: Platform): 'ok' | 'warn' {
+  return count > CLIP_COUNT_WARN_ABOVE[platform] ? 'warn' : 'ok'
+}
