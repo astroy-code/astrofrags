@@ -29,6 +29,9 @@ Everything runs client-side. Nothing is uploaded anywhere (same promise as deskt
 > Superseded in part: background music, branding/watermark and intro/outro were added to the web
 > version afterwards; see `2026-10-20-web-branding-design.md`.
 
+> Also superseded in part: stitching several clips into a reel, with transitions, was added later;
+> see `2026-10-20-web-reel-design.md`.
+
 - Highlight/peak detection, auto-build reel, kill-feed OCR, captions, reels, transitions,
   background music, branding/watermark/intro-outro, export format presets (9:16, 1:1),
   session history, folder watching. (Audio-track selection was a non-goal here until a real

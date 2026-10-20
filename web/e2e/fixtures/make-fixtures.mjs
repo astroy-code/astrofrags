@@ -45,4 +45,9 @@ export function makeFixtures(outDir) {
     '-frames:v', '1', '-f', 'image2', '-c:v', 'png',
     join(outDir, FIXTURE_NAMES.notAudio)
   ])
+  // A portrait phone-shaped clip with sound, to join with the landscape ones.
+  ffmpeg([
+    '-f', 'lavfi', '-i', 'testsrc=duration=6:size=360x640:rate=30', ...AUDIO_SOURCE,
+    ...VP9, '-c:a', 'libopus', '-shortest', join(outDir, FIXTURE_NAMES.portrait)
+  ])
 }
