@@ -78,6 +78,10 @@ test('music is not wired in when the plan has none, and a missing file is report
   assert.throws(() => buildExportArgs({ ...PLAN, music: true }, INPUTS, 'o.mp4'), /music/i)
 })
 
+test('a lower-third without its image is reported', () => {
+  assert.throws(() => buildExportArgs({ ...PLAN, lowerThird: true }, INPUTS, 'o.mp4'), /lower-third/i)
+})
+
 test('planDurationSeconds adds a card duration for each card that is on', () => {
   assert.equal(planDurationSeconds(PLAN), 2)
   assert.equal(planDurationSeconds({ ...PLAN, intro: true }), 5)

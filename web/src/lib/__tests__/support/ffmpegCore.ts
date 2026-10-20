@@ -144,10 +144,12 @@ export interface FixtureOptions {
   readonly color?: string
   readonly frequency?: number
   readonly fps?: number
+  /** For `boxPng`: an opaque box drawn on an otherwise transparent canvas. */
+  readonly box?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number; readonly color: string }
 }
 
 /** `rawVideo` is an uncompressed AVI so odd dimensions (which x264 rejects) can be tested. */
-export type FixtureKind = 'video' | 'videoNoAudio' | 'twoTrack' | 'tone' | 'png' | 'rawVideo'
+export type FixtureKind = 'video' | 'videoNoAudio' | 'twoTrack' | 'tone' | 'png' | 'rawVideo' | 'boxPng'
 
 const DEFAULT_WIDTH = 320
 const DEFAULT_HEIGHT = 180
@@ -185,6 +187,16 @@ export async function makeFixture(kind: FixtureKind, opts: FixtureOptions = {}):
         ...ENCODE, '-c:a', 'aac', '-t', String(duration), 'out.mp4'
       ],
       output: 'out.mp4'
+    },
+    boxPng: {
+      args: [
+        '-f', 'lavfi', '-i', `color=c=0x000000@0.0:s=${width}x${height}:d=1`,
+        '-vf',
+        `format=rgba,drawbox=x=${opts.box?.x ?? 0}:y=${opts.box?.y ?? 0}:w=${opts.box?.width ?? 1}:` +
+          `h=${opts.box?.height ?? 1}:color=${ffmpegColor(opts.box?.color ?? '#0000ff')}@1.0:t=fill`,
+        '-frames:v', '1', 'out.png'
+      ],
+      output: 'out.png'
     },
     tone: { args: [...tone(opts.frequency ?? 330), '-c:a', 'pcm_s16le', 'out.wav'], output: 'out.wav' },
     png: {

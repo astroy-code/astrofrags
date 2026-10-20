@@ -207,6 +207,33 @@ test('music still works with a loud clip and both cards', async () => {
   assert.equal(info.audioStreams, 1)
 })
 
+const isBlue = (p: { r: number; g: number; b: number }) => p.b > 180 && p.r < 70 && p.g < 70
+const boxPng = (box: { x: number; y: number; width: number; height: number }) =>
+  makeFixture('boxPng', { width: OUTPUT.width, height: OUTPUT.height, box: { ...box, color: '#0000ff' } })
+
+test('the lower-third shows over the clip', async () => {
+  const lowerThirdPng = await boxPng({ x: 10, y: 140, width: 100, height: 30 })
+  const out = await exportClip(basePlan({ lowerThird: true }), await makeFixture('video'), { lowerThirdPng })
+  assert.ok(isBlue(await pixelAt(out, 'out.mp4', 50, 150, 0.5)))
+  assert.ok(!isBlue(await pixelAt(out, 'out.mp4', 200, 50, 0.5)), 'transparent areas stay clear')
+})
+
+test('the lower-third also shows over the cards', async () => {
+  const lowerThirdPng = await boxPng({ x: 10, y: 140, width: 100, height: 30 })
+  const plan = basePlan({ ...WITH_CARDS, intro: true, lowerThird: true })
+  const out = await exportClip(plan, await makeFixture('video'), { card: await cardPng(), lowerThirdPng })
+  assert.ok(isBlue(await pixelAt(out, 'out.mp4', 50, 150, 1.5)))
+  assert.ok(isBlue(await pixelAt(out, 'out.mp4', 50, 150, 3.3)))
+})
+
+test('the lower-third sits on top of the watermark', async () => {
+  const lowerThirdPng = await boxPng({ x: 0, y: 140, width: 80, height: 40 })
+  const plan = basePlan({ watermarkCorner: 'bottom-left', lowerThird: true })
+  const out = await exportClip(plan, await makeFixture('video'), { lowerThirdPng })
+  const mark = watermarkRect('bottom-left', OUTPUT, LOGO)
+  assert.ok(isBlue(await pixelAt(out, 'out.mp4', mark.x + 13, mark.y + 13, 0.5)), 'box covers the logo')
+})
+
 test('cards still work for a clip with no audio', async () => {
   const plan = basePlan({ ...WITH_CARDS, intro: true, outro: true, clip: { start: 0, end: 1, audioTrackIndex: null } })
   const out = await exportClip(plan, await makeFixture('videoNoAudio'), { card: await cardPng() })
