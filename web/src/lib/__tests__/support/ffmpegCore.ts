@@ -143,6 +143,7 @@ export interface FixtureOptions {
   readonly duration?: number
   readonly color?: string
   readonly frequency?: number
+  readonly fps?: number
 }
 
 /** `rawVideo` is an uncompressed AVI so odd dimensions (which x264 rejects) can be tested. */
@@ -160,7 +161,7 @@ export async function makeFixture(kind: FixtureKind, opts: FixtureOptions = {}):
   const width = opts.width ?? DEFAULT_WIDTH
   const height = opts.height ?? DEFAULT_HEIGHT
   const duration = opts.duration ?? DEFAULT_DURATION
-  const video = ['-f', 'lavfi', '-i', `testsrc=duration=${duration}:size=${width}x${height}:rate=30`]
+  const video = ['-f', 'lavfi', '-i', `testsrc=duration=${duration}:size=${width}x${height}:rate=${opts.fps ?? 30}`]
   const tone = (frequency: number): string[] => [
     '-f', 'lavfi', '-i', `sine=frequency=${frequency}:duration=${duration}`
   ]
