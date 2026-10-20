@@ -16,7 +16,8 @@ const CUSTOM: BrandingSettings = {
   cardDurationSeconds: 5,
   lowerThirdEnabled: true,
   lowerThirdText: 'Ace on Bank',
-  watermarkCorner: 'top-left'
+  watermarkCorner: 'top-left',
+  exportFormat: 'vertical-crop'
 }
 
 test('defaults match the desktop app', () => {
@@ -28,7 +29,8 @@ test('defaults match the desktop app', () => {
     cardDurationSeconds: 3,
     lowerThirdEnabled: false,
     lowerThirdText: '',
-    watermarkCorner: 'bottom-right'
+    watermarkCorner: 'bottom-right',
+    exportFormat: 'original'
   })
 })
 
@@ -112,4 +114,11 @@ test('unknown keys are dropped', () => {
 test('lowerThirdLabel falls back to the display name when text is empty', () => {
   assert.equal(lowerThirdLabel({ ...CUSTOM, lowerThirdText: '' }), 'Rey')
   assert.equal(lowerThirdLabel({ ...CUSTOM, lowerThirdText: 'Ace on Bank' }), 'Ace on Bank')
+})
+
+test('a stored export format that is not one of the four falls back on its own', () => {
+  const parsed = parseBrandingSettings(JSON.stringify({ displayName: 'Rey', exportFormat: 'cinema' }))
+  assert.equal(parsed.exportFormat, 'original')
+  assert.equal(parsed.displayName, 'Rey')
+  assert.equal(parseBrandingSettings(JSON.stringify({ exportFormat: 'square' })).exportFormat, 'square')
 })

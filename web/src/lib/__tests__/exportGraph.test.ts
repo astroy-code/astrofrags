@@ -8,6 +8,7 @@ const PLAN: ExportPlan = {
   output: { width: 320, height: 180 },
   logo: { width: 512, height: 512 },
   watermarkCorner: 'bottom-right',
+  format: 'original',
   intro: false,
   outro: false,
   cardSeconds: 3,
@@ -46,6 +47,31 @@ test('output encode settings are libx264 ultrafast crf 23 yuv420p aac faststart'
     '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-movflags', '+faststart', 'out.mp4'
   ])
+})
+
+test('a preset reframes the clip with the desktop filter and keeps the card-compatible tail', () => {
+  const plan = { ...PLAN, format: 'vertical-crop' as const, output: { width: 1080, height: 1920 } }
+  const graph = graphOf(buildExportArgs(plan, INPUTS, 'out.mp4'))
+  assert.ok(
+    graph.includes('[0:v:0]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[reframed]')
+  )
+  assert.ok(graph.includes('[reframed]setsar=1[main_v]'))
+  const withCards = graphOf(buildExportArgs({ ...plan, intro: true }, { ...INPUTS, introCard: 'i.png' }, 'o.mp4'))
+  assert.ok(withCards.includes('[reframed]setsar=1,fps=30,format=yuv420p,setpts=PTS-STARTPTS[main_v]'))
+})
+
+test('the original format does not reframe', () => {
+  assert.ok(!graphOf(buildExportArgs(PLAN, INPUTS, 'out.mp4')).includes('reframe'))
+})
+
+test('a preset encodes at its target bitrate instead of constant quality', () => {
+  const plan = { ...PLAN, format: 'square' as const, output: { width: 1080, height: 1080 } }
+  const args = buildExportArgs(plan, INPUTS, 'out.mp4')
+  assert.equal(args[args.indexOf('-b:v') + 1], '8M')
+  assert.ok(!args.includes('-crf'))
+  const original = buildExportArgs(PLAN, INPUTS, 'out.mp4')
+  assert.ok(original.includes('-crf'))
+  assert.ok(!original.includes('-b:v'))
 })
 
 test('loudnorm is the last audio filter', () => {

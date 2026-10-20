@@ -240,3 +240,18 @@ button.primary {
   margin-top: var(--gutter);
   border-radius: var(--radius);
 }
+
+.format-picker {
+  margin-top: var(--gutter);
+}
+
+.format-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.format-picker select {
+  min-height: 44px;
+  font: inherit;
+}

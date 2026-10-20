@@ -3,6 +3,7 @@ import { AudioTrackPicker } from './components/AudioTrackPicker.tsx'
 import { BrandingOptions } from './components/BrandingOptions.tsx'
 import { CardPreview } from './components/CardPreview.tsx'
 import { ExportBar } from './components/ExportBar.tsx'
+import { ExportFormatPicker } from './components/ExportFormatPicker.tsx'
 import { MusicPicker } from './components/MusicPicker.tsx'
 import type { ExportState } from './components/ExportBar.tsx'
 import { FilePicker } from './components/FilePicker.tsx'
@@ -17,7 +18,7 @@ import { shouldAutoDeliver } from './lib/deliveryPolicy.ts'
 import { ExportCancelledError, exportTrimmedClip, probeAudioTracks } from './lib/exportClip.ts'
 import { isPreviewUndecodable, UNDECODABLE_MESSAGE } from './lib/previewSupport.ts'
 import { checkFileSize, detectPlatform, parseLimitOverride, SOFT_LIMIT_BYTES } from './lib/sizeLimit.ts'
-import { fitWithin } from './lib/outputGeometry.ts'
+import { formatOutputSize } from './lib/exportFormat.ts'
 import type { Size } from './lib/outputGeometry.ts'
 import { validateTrimRange } from './lib/trimRange.ts'
 import type { TrimRange } from './lib/trimRange.ts'
@@ -197,7 +198,7 @@ export function App(): JSX.Element {
             session.range.start +
             (branding.introEnabled ? branding.cardDurationSeconds : 0) +
             (branding.outroEnabled ? branding.cardDurationSeconds : 0),
-          output: fitWithin(session.videoSize),
+          output: formatOutputSize(branding.exportFormat, session.videoSize),
           hasCards: branding.introEnabled || branding.outroEnabled,
           platform
         })
@@ -257,8 +258,11 @@ export function App(): JSX.Element {
 
       {session && (
         <>
+          <ExportFormatPicker format={branding.exportFormat} onChange={(exportFormat) => updateBranding({ exportFormat })} />
           <BrandingOptions settings={branding} onChange={updateBranding} />
-          {(branding.introEnabled || branding.outroEnabled) && <CardPreview style={branding} />}
+          {(branding.introEnabled || branding.outroEnabled) && (
+            <CardPreview style={branding} format={branding.exportFormat} />
+          )}
           <MusicPicker
             musicFile={session.musicFile}
             onChange={(musicFile) =>

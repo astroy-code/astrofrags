@@ -150,3 +150,53 @@ test('the estimate is shown before exporting', async ({ page }) => {
 
   await expect(page.getByTestId('export-estimate')).toHaveText(/About \d+ s/)
 })
+
+const FORMAT_SIZES = [
+  ['vertical', 1080, 1920],
+  ['vertical-crop', 1080, 1920],
+  ['square', 1080, 1080]
+] as const
+
+for (const [format, width, height] of FORMAT_SIZES) {
+  test(`the ${format} export format gives a ${width}x${height} video`, async ({ page }) => {
+    await pickAndWaitReady(page, FIXTURE_NAMES.clip)
+    await setRange(page, 'end-slider', 2)
+    await page.getByTestId('export-format').selectOption(format)
+
+    const { savedPath } = await exportAndSave(page)
+
+    const result = probe(savedPath)
+    expect(result.videoCodec).toBe('h264')
+    expect([result.width, result.height]).toEqual([width, height])
+    expect(Math.abs(result.durationSeconds - 2)).toBeLessThan(0.4)
+  })
+}
+
+test('a vertical export carries portrait cards and the watermark in its corner', async ({ page }) => {
+  await pickAndWaitReady(page, FIXTURE_NAMES.clip)
+  await setRange(page, 'end-slider', 2)
+  await page.getByTestId('export-format').selectOption('vertical')
+  await page.getByTestId('accent-color').fill('#c81e1e')
+  await page.getByTestId('intro-toggle').check()
+  await page.getByTestId('card-seconds').fill('2')
+
+  const { savedPath } = await exportAndSave(page)
+
+  const result = probe(savedPath)
+  expect([result.width, result.height]).toEqual([1080, 1920])
+  expect(Math.abs(result.durationSeconds - 4)).toBeLessThan(0.4)
+  const card = pixelAt(savedPath, 1, 30, 30)
+  expect(colourDistance(card, { r: 0xc8, g: 0x1e, b: 0x1e })).toBeLessThan(COLOUR_TOLERANCE)
+})
+
+test('the export format is remembered across a reload', async ({ page }) => {
+  await pickAndWaitReady(page, FIXTURE_NAMES.clip)
+  await expect(page.getByTestId('export-format')).toHaveValue('original')
+  await page.getByTestId('export-format').selectOption('square')
+
+  await page.reload()
+  await page.getByTestId('file-input').setInputFiles(fixture(FIXTURE_NAMES.clip))
+  await expect(page.getByTestId('export-button')).toBeEnabled()
+
+  await expect(page.getByTestId('export-format')).toHaveValue('square')
+})

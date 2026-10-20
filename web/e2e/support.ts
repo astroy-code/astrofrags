@@ -18,6 +18,8 @@ export interface Probe {
   readonly videoCodec: string | null
   readonly hasAudio: boolean
   readonly durationSeconds: number
+  readonly width: number
+  readonly height: number
 }
 
 /** `ffmpeg -i` exits non-zero without an output but prints the stream listing to stderr. */
@@ -30,10 +32,13 @@ export function probe(filePath: string): Probe {
   }
   const duration = /Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/.exec(stderr)
   const [h, m, s] = duration ? duration.slice(1).map(Number) : [0, 0, 0]
+  const size = /Video: [^\n]*?, (\d{2,5})x(\d{2,5})/.exec(stderr)
   return {
     videoCodec: /Video: (\w+)/.exec(stderr)?.[1] ?? null,
     hasAudio: /Stream #\d+:\d+.*: Audio:/.test(stderr),
-    durationSeconds: h * 3600 + m * 60 + s
+    durationSeconds: h * 3600 + m * 60 + s,
+    width: Number(size?.[1] ?? 0),
+    height: Number(size?.[2] ?? 0)
   }
 }
 

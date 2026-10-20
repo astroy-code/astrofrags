@@ -1,3 +1,6 @@
+import { parseExportFormat } from './exportFormat.ts'
+import type { ExportFormat } from './exportFormat.ts'
+
 export type WatermarkCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 
 export interface BrandingSettings {
@@ -9,6 +12,7 @@ export interface BrandingSettings {
   readonly lowerThirdEnabled: boolean
   readonly lowerThirdText: string
   readonly watermarkCorner: WatermarkCorner
+  readonly exportFormat: ExportFormat
 }
 
 export const BRANDING_STORAGE_KEY = 'astrofrags.branding.v1'
@@ -22,7 +26,8 @@ export const DEFAULT_BRANDING_SETTINGS: BrandingSettings = {
   cardDurationSeconds: 3,
   lowerThirdEnabled: false,
   lowerThirdText: '',
-  watermarkCorner: 'bottom-right'
+  watermarkCorner: 'bottom-right',
+  exportFormat: 'original'
 }
 
 const CORNERS: readonly WatermarkCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
@@ -75,7 +80,8 @@ export function parseBrandingSettings(raw: string | null): BrandingSettings {
     cardDurationSeconds: cleanDuration(fields.cardDurationSeconds, d.cardDurationSeconds),
     lowerThirdEnabled: cleanBoolean(fields.lowerThirdEnabled, d.lowerThirdEnabled),
     lowerThirdText: cleanText(fields.lowerThirdText, MAX_LOWER_THIRD_LENGTH, d.lowerThirdText),
-    watermarkCorner: cleanCorner(fields.watermarkCorner, d.watermarkCorner)
+    watermarkCorner: cleanCorner(fields.watermarkCorner, d.watermarkCorner),
+    exportFormat: parseExportFormat(fields.exportFormat, d.exportFormat)
   }
 }
 

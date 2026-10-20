@@ -1,4 +1,6 @@
 import type { WatermarkCorner } from './brandingSettings.ts'
+import { buildReframeStage, formatBitrate } from './exportFormat.ts'
+import type { ExportFormat } from './exportFormat.ts'
 import type { Size } from './outputGeometry.ts'
 import { musicFadeSeconds } from './musicFade.ts'
 import { CARD_FADE_SECONDS, watermarkRect } from './overlayLayout.ts'
@@ -14,6 +16,7 @@ export interface ExportPlan {
   readonly output: Size
   readonly logo: Size
   readonly watermarkCorner: WatermarkCorner
+  readonly format: ExportFormat
   readonly intro: boolean
   readonly outro: boolean
   readonly cardSeconds: number
@@ -39,10 +42,16 @@ const SILENCE_SOURCE = 'anullsrc=r=48000:cl=stereo'
 const CARD_FRAME_RATE = 30
 const RESET_TIMESTAMPS = 'setpts=PTS-STARTPTS'
 
-const ENCODE_ARGS = [
-  '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p',
-  '-c:a', 'aac', '-movflags', '+faststart'
-]
+/** Constant quality for the original format; a preset targets its bitrate, as on desktop. */
+function encodeArgs(format: ExportFormat): string[] {
+  const bitrate = formatBitrate(format)
+  return [
+    '-c:v', 'libx264', '-preset', 'ultrafast',
+    ...(bitrate ? ['-b:v', bitrate] : ['-crf', '23']),
+    '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-movflags', '+faststart'
+  ]
+}
 
 const seconds = (value: number): string => value.toFixed(3)
 
@@ -51,11 +60,14 @@ export function planDurationSeconds(plan: ExportPlan): number {
   return plan.clip.end - plan.clip.start + cards
 }
 
-function mainVideoStage(output: Size, cardsOn: boolean): string {
-  const { width, height } = output
+function mainVideoStage(plan: ExportPlan, cardsOn: boolean): string {
+  const { width, height } = plan.output
+  // The original format fits the clip inside the frame; a preset reframes it the desktop way.
   const fit =
-    `[0:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`
+    plan.format === 'original'
+      ? `[0:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`
+      : `${buildReframeStage(plan.format, '[0:v:0]', '[reframed]')};[reframed]setsar=1`
   // With cards the clip must match them for concat: 30 fps, yuv420p, timestamps from zero.
   return cardsOn
     ? `${fit},fps=${CARD_FRAME_RATE},format=yuv420p,${RESET_TIMESTAMPS}[main_v]`
@@ -157,7 +169,7 @@ export function buildExportArgs(plan: ExportPlan, inputs: ExportInputs, outputPa
   }
 
   const cardsOn = plan.intro || plan.outro
-  const stages = [mainVideoStage(plan.output, cardsOn), mainAudioStage(plan, cardsOn)]
+  const stages = [mainVideoStage(plan, cardsOn), mainAudioStage(plan, cardsOn)]
   let videoLabel = '[main_v]'
   let audioLabel = '[main_a]'
 
@@ -204,7 +216,7 @@ export function buildExportArgs(plan: ExportPlan, inputs: ExportInputs, outputPa
     '-filter_complex', stages.join('; '),
     '-map', '[outv]',
     '-map', '[outa]',
-    ...ENCODE_ARGS,
+    ...encodeArgs(plan.format),
     outputPath
   ]
 }

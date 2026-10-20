@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildExportArgs } from '../exportGraph.ts'
 import type { ExportPlan } from '../exportGraph.ts'
+import { formatOutputSize } from '../exportFormat.ts'
 import { fitWithin } from '../outputGeometry.ts'
 import { watermarkRect } from '../overlayLayout.ts'
 import { makeFixture, meanVolumeDb, pixelAt, probeBytes, runCore } from './support/ffmpegCore.ts'
@@ -14,6 +15,7 @@ const basePlan = (overrides: Partial<ExportPlan> = {}): ExportPlan => ({
   output: OUTPUT,
   logo: LOGO,
   watermarkCorner: 'bottom-right',
+  format: 'original',
   intro: false,
   outro: false,
   cardSeconds: 2,
@@ -97,6 +99,55 @@ test('fits a portrait source without distorting or upscaling it', async () => {
   const plan = basePlan({ output: fitWithin({ width: 180, height: 320 }) })
   const info = await probeBytes(await exportClip(plan, video), 'out.mp4')
   assert.deepEqual([info.width, info.height], [180, 320])
+})
+
+const presetPlan = (format: ExportPlan['format'], overrides: Partial<ExportPlan> = {}): ExportPlan =>
+  basePlan({ format, output: formatOutputSize(format, OUTPUT), ...overrides })
+
+for (const format of ['vertical', 'vertical-crop', 'square'] as const) {
+  test(`the ${format} format gives the desktop frame size from a landscape clip`, async () => {
+    const plan = presetPlan(format)
+    const info = await probeBytes(await exportClip(plan, await makeFixture('video')), 'out.mp4')
+    assert.deepEqual([info.width, info.height], [plan.output.width, plan.output.height])
+    assert.ok(Math.abs(info.durationSeconds - 1) < 0.2, `duration ${info.durationSeconds}`)
+  })
+}
+
+test('a preset also fits a portrait clip and one with no audio', async () => {
+  const portrait = await makeFixture('video', { width: 180, height: 320 })
+  const plan = presetPlan('square', { clip: NO_AUDIO })
+  const info = await probeBytes(await exportClip(plan, portrait), 'out.mp4')
+  assert.deepEqual([info.width, info.height], [1080, 1080])
+  assert.equal(info.audioStreams, 1)
+})
+
+test('the blurred bars differ from the cropped fill at the same spot', async () => {
+  const video = await makeFixture('video')
+  const bars = await exportClip(presetPlan('vertical'), video)
+  const crop = await exportClip(presetPlan('vertical-crop'), video)
+  // Row 100 of a 1080x1920 frame is the top bar in bars mode, blurred background; in crop mode
+  // it is sharp picture. Sampling several columns avoids one lucky equal pixel.
+  let differing = 0
+  for (const x of [100, 300, 500, 700, 900]) {
+    const a = await pixelAt(bars, 'out.mp4', x, 100, 0.5)
+    const b = await pixelAt(crop, 'out.mp4', x, 100, 0.5)
+    if (distance(a, b) > 30) differing += 1
+  }
+  assert.ok(differing >= 1, 'bars and crop looked identical')
+})
+
+test('a preset works with both cards and music, and the watermark follows the frame', async () => {
+  const plan = presetPlan('vertical', { ...WITH_CARDS, intro: true, outro: true, music: true })
+  const out = await exportClip(plan, await makeFixture('video'), {
+    card: await cardPng(),
+    music: await makeFixture('tone')
+  })
+  const info = await probeBytes(out, 'out.mp4')
+  assert.deepEqual([info.width, info.height], [1080, 1920])
+  assert.ok(Math.abs(info.durationSeconds - 7) < 0.3, `duration ${info.durationSeconds}`)
+  const rect = watermarkRect('bottom-right', plan.output, LOGO)
+  const inside = await pixelAt(out, 'out.mp4', rect.x + 10, rect.y + 10, 1.5)
+  assert.ok(inside.r > 150 && inside.g < 80, JSON.stringify(inside))
 })
 
 test('draws the watermark in the chosen corner and nowhere else', async () => {

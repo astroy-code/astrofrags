@@ -10,7 +10,7 @@ import type { ExportInputs, ExportPlan } from './exportGraph.ts'
 import { buildLevelProbeArgs } from './ffmpegArgs.ts'
 import { countAudioStreams } from './ffmpegLog.ts'
 import { trimmedFileName } from './fileNames.ts'
-import { fitWithin } from './outputGeometry.ts'
+import { formatOutputSize } from './exportFormat.ts'
 import type { Size } from './outputGeometry.ts'
 import { progressRatio } from './progress.ts'
 import { validateTrimRange } from './trimRange.ts'
@@ -174,9 +174,10 @@ function buildPlan(req: ExportRequest, logo: Logo): ExportPlan {
   const { branding } = req
   return {
     clip: { start: req.start, end: req.end, audioTrackIndex: req.audioTrackIndex },
-    output: fitWithin(req.sourceSize),
+    output: formatOutputSize(branding.exportFormat, req.sourceSize),
     logo: logo.size,
     watermarkCorner: branding.watermarkCorner,
+    format: branding.exportFormat,
     intro: branding.introEnabled,
     outro: branding.outroEnabled,
     cardSeconds: branding.cardDurationSeconds,
