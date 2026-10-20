@@ -138,7 +138,7 @@ test('cancel is honored immediately while the engine is reloading', async ({ pag
   expect(downloads).toEqual([])
 })
 
-test('picking another video during an export cancels it', async ({ page }) => {
+test('starting over during an export cancels it', async ({ page }) => {
   await delayReloads(page, 4000)
   const downloads: string[] = []
   page.on('download', (download) => downloads.push(download.suggestedFilename()))
@@ -148,8 +148,12 @@ test('picking another video during an export cancels it', async ({ page }) => {
   await expect(page.getByTestId('export-button')).toBeEnabled()
   await exportThenCancel(page)
 
-  // The second export now waits on the delayed engine reload when the user picks another video.
+  // The second export now waits on the delayed engine reload when the user starts over. The
+  // picker is locked while exporting, so starting over is the way to a different video.
   await page.getByTestId('export-button').click()
+  await expect(page.getByTestId('file-input')).toBeDisabled()
+  await page.getByTestId('start-over').click()
+  await expect(page.getByTestId('export-button')).toBeHidden()
   await page.getByTestId('file-input').setInputFiles(fixture(FIXTURE_NAMES.silent))
 
   await page.waitForTimeout(9000)

@@ -1,48 +1,39 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { AudioTrackPicker } from './components/AudioTrackPicker.tsx'
 import { BrandingOptions } from './components/BrandingOptions.tsx'
 import { CardPreview } from './components/CardPreview.tsx'
+import { ClipList } from './components/ClipList.tsx'
+import { ClipMetadataProbe } from './components/ClipMetadataProbe.tsx'
 import { ExportBar } from './components/ExportBar.tsx'
 import { ExportFormatPicker } from './components/ExportFormatPicker.tsx'
 import { MusicPicker } from './components/MusicPicker.tsx'
 import type { ExportState } from './components/ExportBar.tsx'
 import { FilePicker } from './components/FilePicker.tsx'
 import { Notice } from './components/Notice.tsx'
+import { TransitionOptions } from './components/TransitionOptions.tsx'
 import { TrimPlayer } from './components/TrimPlayer.tsx'
-import type { VideoMetadata } from './components/TrimPlayer.tsx'
 import { chooseAudioTrack, isSilent } from './lib/audioLevels.ts'
-import type { TrackLevel } from './lib/audioLevels.ts'
 import { deliverClip } from './lib/deliverClip.ts'
-import { estimateExportSeconds } from './lib/estimate.ts'
 import { shouldAutoDeliver } from './lib/deliveryPolicy.ts'
-import { ExportCancelledError, exportTrimmedClip, probeAudioTracks } from './lib/exportClip.ts'
-import { isPreviewUndecodable, UNDECODABLE_MESSAGE } from './lib/previewSupport.ts'
-import { checkFileSize, detectPlatform, parseLimitOverride, SOFT_LIMIT_BYTES } from './lib/sizeLimit.ts'
+import { estimateExportSeconds } from './lib/estimate.ts'
+import { ExportCancelledError, exportTrimmedClip } from './lib/exportClip.ts'
+import type { ExportClip } from './lib/exportClip.ts'
 import { formatOutputSize } from './lib/exportFormat.ts'
-import type { Size } from './lib/outputGeometry.ts'
+import { planDurationSeconds } from './lib/exportGraph.ts'
+import { UNDECODABLE_MESSAGE } from './lib/previewSupport.ts'
+import { selectedClip } from './lib/reel.ts'
+import type { ClipItem } from './lib/reel.ts'
+import { buildExportPlan } from './lib/reelPlan.ts'
+import {
+  checkClipCount,
+  checkFileSize,
+  detectPlatform,
+  parseLimitOverride,
+  SOFT_LIMIT_BYTES
+} from './lib/sizeLimit.ts'
 import { validateTrimRange } from './lib/trimRange.ts'
-import type { TrimRange } from './lib/trimRange.ts'
 import { useBrandingSettings } from './useBrandingSettings.ts'
-
-interface Session {
-  readonly file: File
-  readonly objectUrl: string
-  readonly duration: number
-  readonly range: TrimRange
-  /** Loudness per audio track; empty until the probe finishes (or for a file with no audio). */
-  readonly audioLevels: readonly TrackLevel[]
-  /** Audio streams in the file; null until known, or when the probe could not read the file. */
-  readonly audioTrackCount: number | null
-  readonly audioProbeDone: boolean
-  /** The user's explicit track choice; null means "use the loudest". */
-  readonly audioTrackOverride: number | null
-  readonly previewBroken: boolean
-  readonly sizeWarningDismissed: boolean
-  /** The video's displayed size; 0x0 until the preview reports it. */
-  readonly videoSize: Size
-  /** Background music for this export only; never persisted. */
-  readonly musicFile: File | null
-}
+import { useReel } from './useReel.ts'
 
 interface ExportedClip {
   readonly blob: Blob
@@ -51,103 +42,58 @@ interface ExportedClip {
 
 const BYTES_PER_MEGABYTE = 1024 * 1024
 const IDLE: ExportState = { phase: 'idle' }
+// Only the length of the logo's frame matters for the estimate, so any size will do.
+const ESTIMATE_LOGO = { width: 1, height: 1 }
 
-function newSession(file: File): Session {
-  return {
-    file,
-    objectUrl: URL.createObjectURL(file),
-    duration: 0,
-    range: { start: 0, end: 0 },
-    audioLevels: [],
-    audioTrackCount: null,
-    audioProbeDone: false,
-    audioTrackOverride: null,
-    previewBroken: false,
-    sizeWarningDismissed: false,
-    videoSize: { width: 0, height: 0 },
-    musicFile: null
-  }
-}
-
-/** The audio stream to export, or null when the video has none. */
-function selectedTrack(session: Session): number | null {
-  return chooseAudioTrack({
-    trackCount: session.audioTrackCount,
-    levels: session.audioLevels,
-    override: session.audioTrackOverride
+/** The audio stream to export for a clip, or null when its video has none. */
+const trackOf = (clip: ClipItem): number | null =>
+  chooseAudioTrack({
+    trackCount: clip.audioTrackCount,
+    levels: clip.audioLevels,
+    override: clip.audioTrackOverride
   })
-}
 
-function applyMetadata(session: Session, metadata: VideoMetadata): Session {
-  const durationKnown = Number.isFinite(metadata.duration) && metadata.duration > 0
-  const durationChanged = durationKnown && metadata.duration !== session.duration
-  return {
-    ...session,
-    duration: durationChanged ? metadata.duration : session.duration,
-    // A new duration (including Infinity -> finite on some phone files) resets the range to the whole clip.
-    range: durationChanged ? { start: 0, end: metadata.duration } : session.range,
-    previewBroken: metadata.kind === 'duration' ? session.previewBroken : isPreviewUndecodable(metadata),
-    videoSize:
-      metadata.videoWidth > 0 && metadata.videoHeight > 0
-        ? { width: metadata.videoWidth, height: metadata.videoHeight }
-        : session.videoSize
-  }
-}
+// Export waits for the audio analysis so a quick click can't pick the wrong (silent) track.
+const isReady = (clip: ClipItem): boolean =>
+  clip.audioProbeDone &&
+  !clip.previewBroken &&
+  clip.videoSize.width > 0 &&
+  validateTrimRange(clip.range, clip.duration).ok
+
+const toExportClip = (clip: ClipItem): ExportClip => ({
+  file: clip.file,
+  start: clip.range.start,
+  end: clip.range.end,
+  duration: clip.duration,
+  audioTrackIndex: trackOf(clip),
+  sourceSize: clip.videoSize
+})
+
+const megabytes = (bytes: number): number => Math.round(bytes / BYTES_PER_MEGABYTE)
 
 export function App(): JSX.Element {
   const platform = useMemo(() => detectPlatform(navigator.userAgent, navigator.maxTouchPoints), [])
   const limits = useMemo(() => parseLimitOverride(window.location.search) ?? SOFT_LIMIT_BYTES, [])
   const [branding, updateBranding] = useBrandingSettings()
-  const [session, setSession] = useState<Session | null>(null)
+  const [reel, actions] = useReel()
   const [exportState, setExportState] = useState<ExportState>(IDLE)
   const abortRef = useRef<AbortController | null>(null)
   const exportedRef = useRef<ExportedClip | null>(null)
 
-  const objectUrl = session?.objectUrl
-  useEffect(() => {
-    if (!objectUrl) return undefined
-    return () => URL.revokeObjectURL(objectUrl)
-  }, [objectUrl])
-
-  const handlePick = useCallback((file: File) => {
-    // A running export belongs to the previous video; it must not finish into the new one.
-    // A running export belongs to the previous video; it must not finish into the new one.
-    abortRef.current?.abort()
-    exportedRef.current = null
-    setExportState(IDLE)
-    setSession(newSession(file))
-    void probeAudioTracks(file).then(({ trackCount, levels }) =>
-      setSession((current) =>
-        current && current.file === file
-          ? { ...current, audioLevels: levels, audioTrackCount: trackCount, audioProbeDone: true }
-          : current
-      )
-    )
-  }, [])
-
-  const handleMetadata = useCallback((metadata: VideoMetadata) => {
-    setSession((current) => (current ? applyMetadata(current, metadata) : current))
-  }, [])
+  const running = exportState.phase === 'running'
+  const selected = selectedClip(reel)
+  const hasClips = reel.clips.length > 0
 
   const handleExport = useCallback(async () => {
-    if (!session) return
+    if (reel.clips.length === 0) return
     const controller = new AbortController()
     abortRef.current = controller
     setExportState({ phase: 'running', progress: 0 })
     try {
       const clip = await exportTrimmedClip({
-        clips: [
-          {
-            file: session.file,
-            start: session.range.start,
-            end: session.range.end,
-            duration: session.duration,
-            audioTrackIndex: selectedTrack(session),
-            sourceSize: session.videoSize
-          }
-        ],
+        clips: reel.clips.map(toExportClip),
         branding,
-        musicFile: session.musicFile,
+        musicFile: reel.musicFile,
         onProgress: (progress) =>
           setExportState((current) => (current.phase === 'running' ? { phase: 'running', progress } : current)),
         signal: controller.signal
@@ -156,7 +102,7 @@ export function App(): JSX.Element {
       const delivery = shouldAutoDeliver(platform) ? await deliverClip(clip.blob, clip.fileName, platform) : 'pending'
       setExportState({ phase: 'done', fileName: clip.fileName, delivery })
     } catch (error) {
-      // A superseded export (the user picked another video) must not overwrite newer state.
+      // A superseded export (the user started over) must not overwrite newer state.
       if (abortRef.current !== controller) return
       if (error instanceof ExportCancelledError) {
         setExportState(IDLE)
@@ -166,7 +112,7 @@ export function App(): JSX.Element {
     } finally {
       if (abortRef.current === controller) abortRef.current = null
     }
-  }, [session, platform, branding])
+  }, [reel.clips, reel.musicFile, platform, branding])
 
   const handleDeliverAgain = useCallback(async () => {
     const clip = exportedRef.current
@@ -175,61 +121,102 @@ export function App(): JSX.Element {
     setExportState({ phase: 'done', fileName: clip.fileName, delivery })
   }, [platform])
 
-  const handleTrimAnother = useCallback(() => {
+  const handleStartOver = useCallback(() => {
+    // A running export belongs to the old reel; it must not finish into a new one.
     abortRef.current?.abort()
+    abortRef.current = null
     exportedRef.current = null
     setExportState(IDLE)
-    setSession(null)
-  }, [])
+    actions.startOver()
+  }, [actions])
 
-  // Export waits for the audio analysis so a quick click can't pick the wrong (silent) track.
-  const canExport =
-    session !== null &&
-    session.audioProbeDone &&
-    !session.previewBroken &&
-    session.videoSize.width > 0 &&
-    validateTrimRange(session.range, session.duration).ok
+  const handlePick = useCallback(
+    (files: readonly File[]) => {
+      // New clips make a finished export stale.
+      exportedRef.current = null
+      setExportState((current) => (current.phase === 'running' ? current : IDLE))
+      actions.addFiles(files)
+    },
+    [actions]
+  )
+
+  const canExport = hasClips && reel.clips.every(isReady)
+  const brokenClips = reel.clips.filter((clip) => clip.previewBroken)
   const allTracksSilent =
-    session !== null &&
-    session.audioProbeDone &&
-    session.audioLevels.length > 0 &&
-    session.audioLevels.every(isSilent)
-  const estimateSeconds =
-    session !== null && canExport
-      ? estimateExportSeconds({
-          durationSeconds:
-            session.range.end -
-            session.range.start +
-            (branding.introEnabled ? branding.cardDurationSeconds : 0) +
-            (branding.outroEnabled ? branding.cardDurationSeconds : 0),
-          output: formatOutputSize(branding.exportFormat, session.videoSize),
-          hasCards: branding.introEnabled || branding.outroEnabled,
-          platform
-        })
-      : null
-  const sizeWarning =
-    session !== null && !session.sizeWarningDismissed && checkFileSize(session.file.size, platform, limits) === 'warn'
+    selected !== null && selected.audioProbeDone && selected.audioLevels.length > 0 && selected.audioLevels.every(isSilent)
+  const probing = reel.clips.some((clip) => !clip.audioProbeDone)
+  const cardsOn = branding.introEnabled || branding.outroEnabled
+
+  const estimateSeconds = useMemo(() => {
+    if (!canExport) return null
+    const plan = buildExportPlan({
+      clips: reel.clips.map(toExportClip),
+      branding,
+      hasMusic: reel.musicFile !== null,
+      logo: ESTIMATE_LOGO
+    })
+    return estimateExportSeconds({
+      durationSeconds: planDurationSeconds(plan),
+      output: formatOutputSize(branding.exportFormat, reel.clips[0].videoSize),
+      hasCards: cardsOn,
+      platform
+    })
+  }, [canExport, reel.clips, reel.musicFile, branding, cardsOn, platform])
+
+  const totalBytes = reel.clips.reduce((sum, clip) => sum + clip.file.size, 0)
+  const sizeWarning = selected !== null && !selected.sizeWarningDismissed && checkFileSize(selected.file.size, platform, limits) === 'warn'
+  const totalWarning = reel.clips.length > 1 && checkFileSize(totalBytes, platform, limits) === 'warn'
+  const countWarning = checkClipCount(reel.clips.length, platform) === 'warn'
 
   return (
     <main className="app">
       <h1>Astrofrags Web</h1>
-      <p className="tagline">Trim a clip right in your browser. Nothing is uploaded.</p>
+      <p className="tagline">Trim a clip, or join several, right in your browser. Nothing is uploaded.</p>
 
-      <FilePicker label={session ? 'Pick a different video' : 'Pick a video'} onPick={(files) => handlePick(files[0])} />
+      <div className="toolbar">
+        <FilePicker label={hasClips ? 'Add more clips' : 'Pick a video'} disabled={running} onPick={handlePick} />
+        {hasClips && (
+          <button type="button" data-testid="start-over" onClick={handleStartOver}>
+            Start over
+          </button>
+        )}
+      </div>
 
-      {session && sizeWarning && (
+      {reel.clips.map((clip) => (
+        <ClipMetadataProbe
+          key={clip.objectUrl}
+          objectUrl={clip.objectUrl}
+          onMetadata={(metadata) => actions.reportMetadata(clip.id, metadata)}
+        />
+      ))}
+
+      {selected && sizeWarning && (
         <Notice
           kind="warn"
           actionLabel={platform === 'mobile' ? 'Try anyway' : undefined}
-          onAction={() => setSession({ ...session, sizeWarningDismissed: true })}
+          onAction={() => actions.patch(selected.id, { sizeWarningDismissed: true })}
         >
           {platform === 'mobile'
-            ? `This video is ${Math.round(session.file.size / BYTES_PER_MEGABYTE)} MB, which is large for a phone browser and may crash this tab. For long recordings, use the desktop app.`
-            : `This video is ${Math.round(session.file.size / BYTES_PER_MEGABYTE)} MB. The web version may be slow or run out of memory on files this big; for long recordings, the desktop app is more reliable.`}
+            ? `This video is ${megabytes(selected.file.size)} MB, which is large for a phone browser and may crash this tab. For long recordings, use the desktop app.`
+            : `This video is ${megabytes(selected.file.size)} MB. The web version may be slow or run out of memory on files this big; for long recordings, the desktop app is more reliable.`}
         </Notice>
       )}
 
-      {session && !session.audioProbeDone && <p data-testid="audio-status">Analyzing audio…</p>}
+      {totalWarning && (
+        <Notice kind="warn">
+          Together these clips are {megabytes(totalBytes)} MB. Joining that much video in the browser may be slow or
+          run out of memory; for a long reel, the desktop app is more reliable.
+        </Notice>
+      )}
+
+      {countWarning && (
+        <Notice kind="warn">
+          {reel.clips.length} clips is a lot for {platform === 'mobile' ? 'a phone browser' : 'one browser tab'}. The
+          export may be slow or run out of memory; fewer clips are safer.
+        </Notice>
+      )}
+
+      {probing && <p data-testid="audio-status">Analyzing audio…</p>}
 
       {allTracksSilent && (
         <Notice kind="warn">
@@ -237,59 +224,72 @@ export function App(): JSX.Element {
         </Notice>
       )}
 
-      {session && session.previewBroken && <Notice kind="error">{UNDECODABLE_MESSAGE}</Notice>}
+      {brokenClips.map((clip) => (
+        <Notice key={clip.id} kind="error">
+          {reel.clips.length > 1 ? `${clip.file.name}: ${UNDECODABLE_MESSAGE}` : UNDECODABLE_MESSAGE}
+        </Notice>
+      ))}
 
-      {session && (
+      {hasClips && (
+        <ClipList
+          clips={reel.clips}
+          selectedId={reel.selectedId}
+          locked={running}
+          onSelect={actions.select}
+          onMove={actions.move}
+          onRemove={actions.remove}
+        />
+      )}
+
+      {selected && (
         <TrimPlayer
-          key={session.objectUrl}
-          objectUrl={session.objectUrl}
-          duration={session.duration}
-          range={session.range}
-          onMetadata={handleMetadata}
-          onRangeChange={(range) => setSession({ ...session, range })}
+          key={selected.objectUrl}
+          objectUrl={selected.objectUrl}
+          duration={selected.duration}
+          range={selected.range}
+          locked={running}
+          onMetadata={(metadata) => actions.reportMetadata(selected.id, metadata)}
+          onRangeChange={(range) => actions.patch(selected.id, { range })}
         />
       )}
 
-      {session && session.audioLevels.length > 1 && (
+      {selected && selected.audioLevels.length > 1 && (
         <AudioTrackPicker
-          levels={session.audioLevels}
-          selected={selectedTrack(session) ?? 0}
-          onSelect={(audioTrackOverride) =>
-            setSession((current) => (current ? { ...current, audioTrackOverride } : current))
-          }
+          levels={selected.audioLevels}
+          selected={trackOf(selected) ?? 0}
+          onSelect={(audioTrackOverride) => actions.patch(selected.id, { audioTrackOverride })}
         />
       )}
 
-      {session && (
-        <>
+      {hasClips && (
+        <fieldset className="plain-group" disabled={running}>
+          <TransitionOptions
+            settings={branding}
+            clipCount={reel.clips.length}
+            disabled={running}
+            onChange={updateBranding}
+          />
           <ExportFormatPicker format={branding.exportFormat} onChange={(exportFormat) => updateBranding({ exportFormat })} />
           <BrandingOptions settings={branding} onChange={updateBranding} />
-          {(branding.introEnabled || branding.outroEnabled) && (
-            <CardPreview style={branding} format={branding.exportFormat} />
-          )}
-          <MusicPicker
-            musicFile={session.musicFile}
-            onChange={(musicFile) =>
-              setSession((current) => (current && current.file === session.file ? { ...current, musicFile } : current))
-            }
-          />
-        </>
+          {cardsOn && <CardPreview style={branding} format={branding.exportFormat} />}
+          <MusicPicker musicFile={reel.musicFile} onChange={actions.setMusicFile} />
+        </fieldset>
       )}
 
-      {session && estimateSeconds !== null && exportState.phase !== 'running' && (
+      {hasClips && estimateSeconds !== null && !running && (
         <p className="hint" data-testid="export-estimate">
           About {estimateSeconds} s
         </p>
       )}
 
-      {session && (
+      {hasClips && (
         <ExportBar
           canExport={canExport}
           state={exportState}
           onExport={() => void handleExport()}
           onCancel={() => abortRef.current?.abort()}
           onDeliver={() => void handleDeliverAgain()}
-          onTrimAnother={handleTrimAnother}
+          onTrimAnother={handleStartOver}
         />
       )}
     </main>

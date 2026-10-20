@@ -339,3 +339,22 @@ button.primary {
   width: 24px;
   height: 24px;
 }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px var(--gutter);
+  margin-bottom: var(--gutter);
+}
+
+.toolbar .file-picker {
+  margin-bottom: 0;
+}
+
+.plain-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}

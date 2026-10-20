@@ -94,3 +94,6 @@ export const selectedClip = (reel: Reel): ClipItem | null =>
   reel.clips.find((clip) => clip.id === reel.selectedId) ?? null
 
 export const setMusic = (reel: Reel, musicFile: File | null): Reel => ({ ...reel, musicFile })
+
+/** Empties the reel for "Start over". The id counter keeps going so a late result for an old clip can't match a new one. */
+export const clearReel = (reel: Reel): Reel => ({ ...emptyReel(), nextId: reel.nextId })

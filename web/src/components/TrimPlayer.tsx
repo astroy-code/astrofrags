@@ -1,30 +1,34 @@
 import { useRef } from 'react'
 import { formatTime } from '../lib/formatTime.ts'
+import type { VideoMetadata } from '../lib/clipMetadata.ts'
 import { withEnd, withStart } from '../lib/trimRange.ts'
 import type { TrimRange } from '../lib/trimRange.ts'
 
-export interface VideoMetadata {
-  /** 'duration' fires before video dimensions are known, so it must not be used to judge decodability. */
-  readonly kind: 'metadata' | 'duration' | 'error'
-  readonly duration: number
-  readonly videoWidth: number
-  readonly videoHeight: number
-  readonly error: unknown
-}
+export type { VideoMetadata }
 
 interface TrimPlayerProps {
   readonly objectUrl: string
   readonly duration: number
   readonly range: TrimRange
+  /** True while an export runs: the trim can't be changed then. */
+  readonly locked?: boolean
   readonly onMetadata: (metadata: VideoMetadata) => void
   readonly onRangeChange: (range: TrimRange) => void
 }
 
 const SLIDER_STEP_SECONDS = 0.01
 
-export function TrimPlayer({ objectUrl, duration, range, onMetadata, onRangeChange }: TrimPlayerProps): JSX.Element {
+export function TrimPlayer({
+  objectUrl,
+  duration,
+  range,
+  locked = false,
+  onMetadata,
+  onRangeChange
+}: TrimPlayerProps): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
   const ready = Number.isFinite(duration) && duration > 0
+  const editable = ready && !locked
 
   const reportMetadata = (kind: VideoMetadata['kind']): void => {
     const el = videoRef.current
@@ -64,7 +68,7 @@ export function TrimPlayer({ objectUrl, duration, range, onMetadata, onRangeChan
             max={ready ? duration : 0}
             step={SLIDER_STEP_SECONDS}
             value={range.start}
-            disabled={!ready}
+            disabled={!editable}
             onChange={(event) => {
               const next = withStart(range, Number(event.target.value), duration)
               onRangeChange(next)
@@ -75,7 +79,7 @@ export function TrimPlayer({ objectUrl, duration, range, onMetadata, onRangeChan
         <button
           type="button"
           data-testid="set-start"
-          disabled={!ready}
+          disabled={!editable}
           onClick={() => onRangeChange(withStart(range, videoRef.current?.currentTime ?? 0, duration))}
         >
           Use current position
@@ -91,7 +95,7 @@ export function TrimPlayer({ objectUrl, duration, range, onMetadata, onRangeChan
             max={ready ? duration : 0}
             step={SLIDER_STEP_SECONDS}
             value={range.end}
-            disabled={!ready}
+            disabled={!editable}
             onChange={(event) => {
               const next = withEnd(range, Number(event.target.value), duration)
               onRangeChange(next)
@@ -102,7 +106,7 @@ export function TrimPlayer({ objectUrl, duration, range, onMetadata, onRangeChan
         <button
           type="button"
           data-testid="set-end"
-          disabled={!ready}
+          disabled={!editable}
           onClick={() => onRangeChange(withEnd(range, videoRef.current?.currentTime ?? duration, duration))}
         >
           Use current position

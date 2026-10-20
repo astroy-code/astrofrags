@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   addClips,
+  clearReel,
   createClip,
   emptyReel,
   moveClip,
@@ -127,4 +128,13 @@ test('no reel function mutates its input', () => {
     selectClip(reel, 3)
     setMusic(reel, null)
   })
+})
+
+test('clearing the reel empties it but never reuses an id, so a late probe cannot hit a new clip', () => {
+  const cleared = clearReel(setMusic(three(), file('song.mp3')))
+  assert.deepEqual(cleared.clips, [])
+  assert.equal(cleared.selectedId, null)
+  assert.equal(cleared.musicFile, null)
+  const again = addClips(cleared, [item('x')])
+  assert.ok(again.clips[0].id > 3)
 })
