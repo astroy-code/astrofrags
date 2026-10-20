@@ -45,6 +45,8 @@ export interface ExportRequest {
   readonly clips: readonly ExportClip[]
   readonly branding: BrandingSettings
   readonly musicFile: File | null
+  /** Music only: drop the clips' own sound. Ignored without music. */
+  readonly muteOriginal: boolean
   readonly onProgress: (ratio: number) => void
   readonly signal?: AbortSignal
 }
@@ -220,6 +222,7 @@ async function runExport(req: ExportRequest): Promise<ExportResult> {
     clips: req.clips,
     branding: req.branding,
     hasMusic: req.musicFile !== null,
+    muteOriginal: req.muteOriginal,
     logo: logo.size
   })
   const planSeconds = planDurationSeconds(plan)

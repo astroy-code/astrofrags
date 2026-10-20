@@ -10,6 +10,7 @@ import {
   selectClip,
   selectedClip,
   setMusic,
+  setMuteOriginal,
   updateClip
 } from '../reel.ts'
 import type { Reel } from '../reel.ts'
@@ -137,4 +138,26 @@ test('clearing the reel empties it but never reuses an id, so a late probe canno
   assert.equal(cleared.musicFile, null)
   const again = addClips(cleared, [item('x')])
   assert.ok(again.clips[0].id > 3)
+})
+
+test('music only starts off and is switched on and off', () => {
+  assert.equal(emptyReel().muteOriginal, false)
+  const on = setMuteOriginal(setMusic(three(), file('song.mp3')), true)
+  assert.equal(on.muteOriginal, true)
+  assert.equal(setMuteOriginal(on, false).muteOriginal, false)
+})
+
+test('removing the music also switches music only off, so the next song starts ducked', () => {
+  const on = setMuteOriginal(setMusic(three(), file('song.mp3')), true)
+  assert.equal(setMusic(on, null).muteOriginal, false)
+  assert.equal(setMusic(on, file('other.mp3')).muteOriginal, true)
+})
+
+test('music only cannot be switched on without music', () => {
+  assert.equal(setMuteOriginal(three(), true).muteOriginal, false)
+})
+
+test('clearing the reel switches music only off', () => {
+  const on = setMuteOriginal(setMusic(three(), file('song.mp3')), true)
+  assert.equal(clearReel(on).muteOriginal, false)
 })

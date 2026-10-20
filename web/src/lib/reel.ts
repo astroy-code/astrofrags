@@ -29,10 +29,12 @@ export interface Reel {
   readonly selectedId: number | null
   /** Background music for this export only; never persisted. */
   readonly musicFile: File | null
+  /** Music only: drop the clips' own sound. Only meaningful (and only settable) with music. */
+  readonly muteOriginal: boolean
   readonly nextId: number
 }
 
-export const emptyReel = (): Reel => ({ clips: [], selectedId: null, musicFile: null, nextId: 1 })
+export const emptyReel = (): Reel => ({ clips: [], selectedId: null, musicFile: null, muteOriginal: false, nextId: 1 })
 
 /** A just-picked clip: nothing is known about it until its preview and probe report in. */
 export function createClip(file: File, objectUrl: string): NewClip {
@@ -93,7 +95,17 @@ export function selectClip(reel: Reel, id: number): Reel {
 export const selectedClip = (reel: Reel): ClipItem | null =>
   reel.clips.find((clip) => clip.id === reel.selectedId) ?? null
 
-export const setMusic = (reel: Reel, musicFile: File | null): Reel => ({ ...reel, musicFile })
+/** Takes the music away and, with it, "music only": the next song starts as a quiet bed again. */
+export const setMusic = (reel: Reel, musicFile: File | null): Reel => ({
+  ...reel,
+  musicFile,
+  muteOriginal: musicFile === null ? false : reel.muteOriginal
+})
+
+export const setMuteOriginal = (reel: Reel, muteOriginal: boolean): Reel => ({
+  ...reel,
+  muteOriginal: muteOriginal && reel.musicFile !== null
+})
 
 /** Empties the reel for "Start over". The id counter keeps going so a late result for an old clip can't match a new one. */
 export const clearReel = (reel: Reel): Reel => ({ ...emptyReel(), nextId: reel.nextId })

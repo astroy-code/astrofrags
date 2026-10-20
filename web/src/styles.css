@@ -358,3 +358,11 @@ button.primary {
   padding: 0;
   border: 0;
 }
+
+.reel-total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px var(--gutter);
+  margin-top: var(--gutter);
+}

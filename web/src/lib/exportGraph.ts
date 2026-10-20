@@ -18,6 +18,8 @@ export interface ExportPlan extends ReelPlan {
   readonly outro: boolean
   readonly cardSeconds: number
   readonly music: boolean
+  /** With music: drop the reel's own sound and play the music alone (desktop's "music only"). */
+  readonly muteOriginal: boolean
   readonly lowerThird: boolean
 }
 
@@ -60,6 +62,18 @@ interface Labels {
   readonly audioLabel: string
 }
 
+/** The music, looped to cover the reel and faded at both ends; `bedVolume` quietens it under the reel's sound. */
+function musicTrack(plan: ExportPlan, musicIndex: number, bedVolume: boolean): string {
+  const length = reelLength(plan)
+  const fade = musicFadeSeconds(length)
+  const fadeOutStart = Math.max(length - fade, 0)
+  return (
+    `[${musicIndex}:a]aformat=sample_rates=48000:channel_layouts=stereo,aloop=loop=-1:size=2e9,` +
+    `atrim=0:${seconds(length)},asetpts=PTS-STARTPTS,${bedVolume ? 'volume=0.35,' : ''}` +
+    `afade=t=in:st=0:d=${seconds(fade)},afade=t=out:st=${seconds(fadeOutStart)}:d=${seconds(fade)}`
+  )
+}
+
 /**
  * The desktop music bed (exportReel.ts buildMusicStage), built on the reel's audio only: loop the
  * track to cover the reel, drop it to a quiet bed, fade the ends, duck it under the reel's own
@@ -67,20 +81,28 @@ interface Labels {
  * sidechain trigger and the final mix each need.
  */
 function musicStages(plan: ExportPlan, musicIndex: number, reelAudioLabel: string): Labels {
-  const length = reelLength(plan)
-  const fade = musicFadeSeconds(length)
-  const fadeOutStart = Math.max(length - fade, 0)
   return {
     stages: [
       `${reelAudioLabel}asplit=2[dry][sidechain]`,
-      `[${musicIndex}:a]aformat=sample_rates=48000:channel_layouts=stereo,aloop=loop=-1:size=2e9,` +
-        `atrim=0:${seconds(length)},asetpts=PTS-STARTPTS,volume=0.35,` +
-        `afade=t=in:st=0:d=${seconds(fade)},afade=t=out:st=${seconds(fadeOutStart)}:d=${seconds(fade)}[music]`,
+      `${musicTrack(plan, musicIndex, true)}[music]`,
       '[music][sidechain]sidechaincompress=threshold=0.05:ratio=8:attack=5:release=300[ducked_music]',
       '[dry][ducked_music]amix=inputs=2:duration=first[music_mix_a]'
     ],
     videoLabel: '[main_v]',
     audioLabel: '[music_mix_a]'
+  }
+}
+
+/**
+ * Desktop's "music only" (exportReel.ts buildMusicOnlyStage): the same loop and fades, but the
+ * music replaces the reel's sound at full level instead of ducking under it. ffmpeg errors on an
+ * unconnected filter output, so the discarded reel audio goes to anullsink.
+ */
+function musicOnlyStages(plan: ExportPlan, musicIndex: number, reelAudioLabel: string): Labels {
+  return {
+    stages: [`${reelAudioLabel}anullsink`, `${musicTrack(plan, musicIndex, false)}[music_only_a]`],
+    videoLabel: '[main_v]',
+    audioLabel: '[music_only_a]'
   }
 }
 
@@ -150,7 +172,10 @@ export function buildExportArgs(plan: ExportPlan, inputs: ExportInputs, outputPa
   // Music sits on the reel only, before the cards are joined, so the cards stay silent.
   if (plan.music) {
     if (!inputs.music) throw new Error('The music file is missing.')
-    const music = musicStages(plan, addInput(['-i', inputs.music]), audioLabel)
+    const musicIndex = addInput(['-i', inputs.music])
+    const music = plan.muteOriginal
+      ? musicOnlyStages(plan, musicIndex, audioLabel)
+      : musicStages(plan, musicIndex, audioLabel)
     stages.push(...music.stages)
     audioLabel = music.audioLabel
   }

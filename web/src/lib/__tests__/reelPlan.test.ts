@@ -18,7 +18,7 @@ const settings = (patch: Partial<BrandingSettings> = {}): BrandingSettings => ({
   ...patch
 })
 const plan = (clips: readonly ReelClip[], patch: Partial<BrandingSettings> = {}, music = false) =>
-  buildExportPlan({ clips, branding: settings(patch), hasMusic: music, logo: LOGO, random: () => 0 })
+  buildExportPlan({ clips, branding: settings(patch), hasMusic: music, muteOriginal: false, logo: LOGO, random: () => 0 })
 
 test('a single clip has no transition even when transitions are on', () => {
   const result = plan([clip(0, 4)], { transitionsEnabled: true })
@@ -47,6 +47,7 @@ test('random styles are rolled once per join when the plan is built', () => {
     clips: [clip(0, 4), clip(0, 4), clip(0, 4)],
     branding: settings({ transitionsEnabled: true, transitionStyle: 'random' }),
     hasMusic: false,
+    muteOriginal: false,
     logo: LOGO,
     random: () => rolls[next++]
   })
@@ -85,4 +86,12 @@ test('clip trims and audio tracks carry through in order', () => {
 
 test('an empty reel is rejected', () => {
   assert.throws(() => plan([]), /at least one clip/)
+})
+
+test('music only is on only when there is music', () => {
+  const build = (hasMusic: boolean, muteOriginal: boolean) =>
+    buildExportPlan({ clips: [clip(0, 4)], branding: settings(), hasMusic, muteOriginal, logo: LOGO })
+  assert.equal(build(true, true).muteOriginal, true)
+  assert.equal(build(true, false).muteOriginal, false)
+  assert.equal(build(false, true).muteOriginal, false)
 })

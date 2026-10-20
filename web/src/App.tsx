@@ -19,6 +19,8 @@ import { estimateExportSeconds } from './lib/estimate.ts'
 import { ExportCancelledError, exportTrimmedClip } from './lib/exportClip.ts'
 import type { ExportClip } from './lib/exportClip.ts'
 import { formatOutputSize } from './lib/exportFormat.ts'
+import { fitReelToCap, SHORTS_CAP_SECONDS } from './lib/fitToCap.ts'
+import { formatTime } from './lib/formatTime.ts'
 import { planDurationSeconds } from './lib/exportGraph.ts'
 import { UNDECODABLE_MESSAGE } from './lib/previewSupport.ts'
 import { selectedClip } from './lib/reel.ts'
@@ -44,6 +46,8 @@ const BYTES_PER_MEGABYTE = 1024 * 1024
 const IDLE: ExportState = { phase: 'idle' }
 // Only the length of the logo's frame matters for the estimate, so any size will do.
 const ESTIMATE_LOGO = { width: 1, height: 1 }
+// Desktop's floor when fitting a reel to the Shorts cap (App.tsx MIN_CLIP_DURATION_SECONDS).
+const MIN_FIT_CLIP_SECONDS = 1.5
 
 /** The audio stream to export for a clip, or null when its video has none. */
 const trackOf = (clip: ClipItem): number | null =>
@@ -94,6 +98,7 @@ export function App(): JSX.Element {
         clips: reel.clips.map(toExportClip),
         branding,
         musicFile: reel.musicFile,
+        muteOriginal: reel.muteOriginal,
         onProgress: (progress) =>
           setExportState((current) => (current.phase === 'running' ? { phase: 'running', progress } : current)),
         signal: controller.signal
@@ -112,7 +117,7 @@ export function App(): JSX.Element {
     } finally {
       if (abortRef.current === controller) abortRef.current = null
     }
-  }, [reel.clips, reel.musicFile, platform, branding])
+  }, [reel.clips, reel.musicFile, reel.muteOriginal, platform, branding])
 
   const handleDeliverAgain = useCallback(async () => {
     const clip = exportedRef.current
@@ -147,21 +152,46 @@ export function App(): JSX.Element {
   const probing = reel.clips.some((clip) => !clip.audioProbeDone)
   const cardsOn = branding.introEnabled || branding.outroEnabled
 
-  const estimateSeconds = useMemo(() => {
-    if (!canExport) return null
-    const plan = buildExportPlan({
-      clips: reel.clips.map(toExportClip),
-      branding,
-      hasMusic: reel.musicFile !== null,
-      logo: ESTIMATE_LOGO
+  // The exported length (clips, less crossfade overlap, plus cards) once every trim is valid.
+  const exportedSeconds = useMemo(() => {
+    if (!hasClips || !reel.clips.every((clip) => validateTrimRange(clip.range, clip.duration).ok)) return null
+    return planDurationSeconds(
+      buildExportPlan({
+        clips: reel.clips.map(toExportClip),
+        branding,
+        hasMusic: reel.musicFile !== null,
+        muteOriginal: reel.muteOriginal,
+        logo: ESTIMATE_LOGO
+      })
+    )
+  }, [hasClips, reel.clips, reel.musicFile, reel.muteOriginal, branding])
+
+  const estimateSeconds =
+    canExport && exportedSeconds !== null
+      ? estimateExportSeconds({
+          durationSeconds: exportedSeconds,
+          output: formatOutputSize(branding.exportFormat, reel.clips[0].videoSize),
+          hasCards: cardsOn,
+          platform
+        })
+      : null
+
+  const isShorts = branding.exportFormat === 'vertical' || branding.exportFormat === 'vertical-crop'
+  const overShortsCap = isShorts && exportedSeconds !== null && exportedSeconds > SHORTS_CAP_SECONDS
+
+  const handleFitToCap = useCallback(() => {
+    const cards =
+      (branding.introEnabled ? branding.cardDurationSeconds : 0) +
+      (branding.outroEnabled ? branding.cardDurationSeconds : 0)
+    const fitted = fitReelToCap({
+      ranges: reel.clips.map((clip) => clip.range),
+      capSeconds: SHORTS_CAP_SECONDS,
+      cardSeconds: cards,
+      transitionSeconds: branding.transitionsEnabled ? branding.transitionSeconds : null,
+      minClipSeconds: MIN_FIT_CLIP_SECONDS
     })
-    return estimateExportSeconds({
-      durationSeconds: planDurationSeconds(plan),
-      output: formatOutputSize(branding.exportFormat, reel.clips[0].videoSize),
-      hasCards: cardsOn,
-      platform
-    })
-  }, [canExport, reel.clips, reel.musicFile, branding, cardsOn, platform])
+    reel.clips.forEach((clip, index) => actions.patch(clip.id, { range: fitted[index] }))
+  }, [branding, reel.clips, actions])
 
   const totalBytes = reel.clips.reduce((sum, clip) => sum + clip.file.size, 0)
   const sizeWarning = selected !== null && !selected.sizeWarningDismissed && checkFileSize(selected.file.size, platform, limits) === 'warn'
@@ -230,6 +260,26 @@ export function App(): JSX.Element {
         </Notice>
       ))}
 
+      {exportedSeconds !== null && (
+        <div className="reel-total">
+          <span className={overShortsCap ? 'error-text' : undefined} data-testid="reel-total">
+            Reel length {formatTime(exportedSeconds)}
+            {isShorts ? ' / 3:00 for Shorts' : ''}
+          </span>
+          {overShortsCap && (
+            <button
+              type="button"
+              data-testid="fit-to-cap"
+              disabled={running}
+              title="Proportionally shorten every clip so the reel fits under 3 minutes"
+              onClick={handleFitToCap}
+            >
+              Fit to 3:00
+            </button>
+          )}
+        </div>
+      )}
+
       {hasClips && (
         <ClipList
           clips={reel.clips}
@@ -272,7 +322,12 @@ export function App(): JSX.Element {
           <ExportFormatPicker format={branding.exportFormat} onChange={(exportFormat) => updateBranding({ exportFormat })} />
           <BrandingOptions settings={branding} onChange={updateBranding} />
           {cardsOn && <CardPreview style={branding} format={branding.exportFormat} />}
-          <MusicPicker musicFile={reel.musicFile} onChange={actions.setMusicFile} />
+          <MusicPicker
+            musicFile={reel.musicFile}
+            onChange={actions.setMusicFile}
+            muteOriginal={reel.muteOriginal}
+            onMuteOriginalChange={actions.setMuteOriginal}
+          />
         </fieldset>
       )}
 

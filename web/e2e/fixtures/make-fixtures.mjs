@@ -50,4 +50,11 @@ export function makeFixtures(outDir) {
     '-f', 'lavfi', '-i', 'testsrc=duration=6:size=360x640:rate=30', ...AUDIO_SOURCE,
     ...VP9, '-c:a', 'libopus', '-shortest', join(outDir, FIXTURE_NAMES.portrait)
   ])
+  // A 200 s recording (over the 3:00 Shorts cap), tiny and silent so it is cheap to make and load.
+  ffmpeg([
+    '-f', 'lavfi', '-i', 'testsrc=duration=200:size=160x90:rate=5',
+    ...VP9, join(outDir, FIXTURE_NAMES.long)
+  ])
+  // Music that adds no sound at all, so only the clips' own audio can be heard in an export.
+  ffmpeg(['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', '3', join(outDir, FIXTURE_NAMES.silenceMusic)])
 }

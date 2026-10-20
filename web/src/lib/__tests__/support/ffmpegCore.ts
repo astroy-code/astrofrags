@@ -235,3 +235,10 @@ export async function makeSkewedClip(videoSeconds: number, audioSeconds: number)
   if (run.exitCode !== 0) throw new Error(`could not make the skewed clip:\n${run.log.slice(-400)}`)
   return run.read('skewed.mp4')
 }
+
+/** A WAV of digital silence: a music file that adds nothing, so only the clip's own sound can be heard. */
+export async function makeSilentWav(durationSeconds: number): Promise<Uint8Array> {
+  const run = await runCore(['-f', 'lavfi', '-i', `anullsrc=r=48000:cl=stereo`, '-t', String(durationSeconds), 'silence.wav'])
+  if (run.exitCode !== 0) throw new Error(`could not make the silent wav:\n${run.log.slice(-400)}`)
+  return run.read('silence.wav')
+}

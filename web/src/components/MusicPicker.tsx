@@ -4,12 +4,19 @@ import { countAudioStreamsOfFile } from '../lib/exportClip.ts'
 interface MusicPickerProps {
   readonly musicFile: File | null
   readonly onChange: (file: File | null) => void
+  readonly muteOriginal: boolean
+  readonly onMuteOriginalChange: (muteOriginal: boolean) => void
 }
 
 const NOT_AUDIO_MESSAGE = 'That file has no audio in it, so it can’t be used as music. Pick an audio file.'
 const UNREADABLE_MESSAGE = 'That file could not be read as music. Try a different file.'
 
-export function MusicPicker({ musicFile, onChange }: MusicPickerProps): JSX.Element {
+export function MusicPicker({
+  musicFile,
+  onChange,
+  muteOriginal,
+  onMuteOriginalChange
+}: MusicPickerProps): JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
 
@@ -61,6 +68,17 @@ export function MusicPicker({ musicFile, onChange }: MusicPickerProps): JSX.Elem
             Remove
           </button>
         </p>
+      )}
+      {musicFile && (
+        <label className="check">
+          <input
+            type="checkbox"
+            data-testid="mute-original"
+            checked={muteOriginal}
+            onChange={(event) => onMuteOriginalChange(event.target.checked)}
+          />
+          Music only (mute the clips&apos; own sound)
+        </label>
       )}
       {error && (
         <p className="error-text" role="alert" data-testid="music-error">

@@ -5,7 +5,7 @@ import type { ClipPlan, ExportPlan } from '../exportGraph.ts'
 import { formatOutputSize } from '../exportFormat.ts'
 import { fitWithin } from '../outputGeometry.ts'
 import { watermarkRect } from '../overlayLayout.ts'
-import { makeFixture, makeSkewedClip, meanVolumeDb, pixelAt, probeBytes, runCore, streamSeconds } from './support/ffmpegCore.ts'
+import { makeFixture, makeSilentWav, makeSkewedClip, meanVolumeDb, pixelAt, probeBytes, runCore, streamSeconds } from './support/ffmpegCore.ts'
 
 const OUTPUT = { width: 320, height: 180 }
 const LOGO = { width: 64, height: 64 }
@@ -25,6 +25,7 @@ const basePlan = ({ clip, ...overrides }: PlanOverrides = {}): ExportPlan => ({
   cardSeconds: 2,
   music: false,
   lowerThird: false,
+  muteOriginal: false,
   ...overrides
 })
 
@@ -434,4 +435,33 @@ test('sound shorter than its picture does not drift across several joins', async
   // 4 x 2 s less three 0.3 s overlaps.
   assert.ok(Math.abs(picture - 7.1) < 0.25, `picture ${picture}`)
   assert.ok(Math.abs(sound - 7.1) < 0.25, `sound ${sound}`)
+})
+
+// ---- Music only ----
+
+test('music only drops the clip sound: a silent track over a loud clip gives silence', async () => {
+  const video = await makeFixture('video')
+  const silence = await makeSilentWav(2)
+  const ducked = await exportClip(basePlan({ music: true }), video, { music: silence })
+  assert.ok((await meanVolumeDb(ducked, 'out.mp4')) > -40, 'with the clip sound kept it is audible')
+  const only = await exportClip(basePlan({ music: true, muteOriginal: true }), video, { music: silence })
+  assert.ok((await meanVolumeDb(only, 'out.mp4')) < -80, 'with it muted only the silent music remains')
+})
+
+test('music only plays the music, over a clip with no audio, across a reel with cards', async () => {
+  const video = await makeFixture('video', { duration: 3 })
+  const plan = basePlan({
+    ...WITH_CARDS,
+    intro: true,
+    music: true,
+    muteOriginal: true,
+    clips: [clipOf(0, 2), clipOf(0, 2, null)]
+  })
+  const out = await exportReel(plan, [video, video], {
+    card: await cardPng(),
+    music: await makeFixture('tone', { duration: 2 })
+  })
+  const info = await probeBytes(out, 'out.mp4')
+  assert.ok(Math.abs(info.durationSeconds - 7) < 0.3, `duration ${info.durationSeconds}`)
+  assert.ok((await meanVolumeDb(out, 'out.mp4')) > -40)
 })

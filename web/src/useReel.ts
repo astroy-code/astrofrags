@@ -11,6 +11,7 @@ import {
   removeClip,
   selectClip,
   setMusic,
+  setMuteOriginal,
   updateClip
 } from './lib/reel.ts'
 import type { ClipItem, Reel } from './lib/reel.ts'
@@ -23,6 +24,7 @@ export interface ReelActions {
   readonly patch: (id: number, patch: Partial<Omit<ClipItem, 'id'>>) => void
   readonly reportMetadata: (id: number, metadata: VideoMetadata) => void
   readonly setMusicFile: (file: File | null) => void
+  readonly setMuteOriginal: (muteOriginal: boolean) => void
   readonly startOver: () => void
 }
 
@@ -91,6 +93,7 @@ export function useReel(): readonly [Reel, ReelActions] {
     patch,
     reportMetadata,
     setMusicFile: useCallback((file) => commit(setMusic(reelRef.current, file)), [commit]),
+    setMuteOriginal: useCallback((mute) => commit(setMuteOriginal(reelRef.current, mute)), [commit]),
     startOver: useCallback(() => commit(clearReel(reelRef.current)), [commit])
   }
   return [reel, actions]

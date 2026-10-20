@@ -14,7 +14,8 @@ const PLAN: ExportPlan = {
   outro: false,
   cardSeconds: 3,
   music: false,
-  lowerThird: false
+  lowerThird: false,
+  muteOriginal: false
 }
 const INPUTS: ExportInputs = { videos: ['in.mp4'], logo: 'logo.png' }
 
@@ -206,4 +207,37 @@ test('every clip of a reel gets its own reframe labels in a preset', () => {
   const graph = graphOf(buildExportArgs(plan, REEL_INPUTS, 'o.mp4'))
   assert.ok(graph.includes('[0:v:0]split=2[c0_reframe_bg_in][c0_reframe_fg_in]'))
   assert.ok(graph.includes('[1:v:0]split=2[c1_reframe_bg_in][c1_reframe_fg_in]'))
+})
+
+// ---- Music only (mute the original audio) ----
+
+const MUTED = { ...PLAN, music: true, muteOriginal: true }
+const MUSIC_INPUTS: ExportInputs = { ...INPUTS, music: 'm.wav' }
+
+test('music only discards the clip audio and uses the music alone at full level', () => {
+  const graph = graphOf(buildExportArgs(MUTED, MUSIC_INPUTS, 'o.mp4'))
+  assert.ok(graph.includes('[main_a]anullsink'), 'the clip audio goes to a sink, not to an unconnected pad')
+  assert.ok(graph.includes('[music_only_a]'))
+  assert.ok(!graph.includes('sidechaincompress'))
+  assert.ok(!graph.includes('amix'))
+  assert.ok(!graph.includes('volume=0.35'))
+  assert.ok(graph.includes('[music_only_a]loudnorm=I=-16:TP=-1.5:LRA=11[outa]'))
+})
+
+test('music only keeps the same loop, trim and fades as the ducked bed', () => {
+  const graph = graphOf(buildExportArgs(MUTED, MUSIC_INPUTS, 'o.mp4'))
+  assert.ok(graph.includes('aloop=loop=-1:size=2e9,atrim=0:2.000,asetpts=PTS-STARTPTS,afade=t=in:st=0:d=1.000'))
+  assert.ok(graph.includes('afade=t=out:st=1.000:d=1.000'))
+})
+
+test('music only still leaves the cards silent and the music under the reel only', () => {
+  const plan = { ...MUTED, intro: true, cardSeconds: 3 }
+  const graph = graphOf(buildExportArgs(plan, { ...MUSIC_INPUTS, introCard: 'i.png' }, 'o.mp4'))
+  assert.ok(graph.includes('[intro_v][intro_a][main_v][music_only_a]concat=n=2'))
+})
+
+test('muting does nothing without a music file', () => {
+  const graph = graphOf(buildExportArgs({ ...PLAN, muteOriginal: true }, INPUTS, 'o.mp4'))
+  assert.ok(!graph.includes('anullsink'))
+  assert.ok(graph.includes('[main_a]loudnorm'))
 })

@@ -6,5 +6,7 @@
   "twoTrack": "two-track.webm",
   "music": "music.wav",
   "notAudio": "not-audio.mp3",
-  "portrait": "portrait.webm"
+  "portrait": "portrait.webm",
+  "long": "long.webm",
+  "silenceMusic": "silence.wav"
 }

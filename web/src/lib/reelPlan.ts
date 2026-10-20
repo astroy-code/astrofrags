@@ -21,6 +21,8 @@ export interface PlanInput {
   readonly clips: readonly ReelClip[]
   readonly branding: BrandingSettings
   readonly hasMusic: boolean
+  /** Music only: drop the clips' own sound. Ignored when there is no music. */
+  readonly muteOriginal: boolean
   readonly logo: Size
   /** Rolls "random" transition styles; injectable so plans are testable. */
   readonly random?: () => number
@@ -30,7 +32,7 @@ export interface PlanInput {
  * The export plan for a reel: what to join, how (hard cuts, or one effective transition length
  * and one style per join, rolled now so the graph is deterministic) and at what frame size.
  */
-export function buildExportPlan({ clips, branding, hasMusic, logo, random }: PlanInput): ExportPlan {
+export function buildExportPlan({ clips, branding, hasMusic, muteOriginal, logo, random }: PlanInput): ExportPlan {
   if (clips.length === 0) throw new Error('A reel needs at least one clip.')
   const plans = clips.map(({ start, end, audioTrackIndex }) => ({ start, end, audioTrackIndex }))
   const joins = clips.length - 1
@@ -52,6 +54,7 @@ export function buildExportPlan({ clips, branding, hasMusic, logo, random }: Pla
     outro: branding.outroEnabled,
     cardSeconds: branding.cardDurationSeconds,
     music: hasMusic,
+    muteOriginal: hasMusic && muteOriginal,
     lowerThird: branding.lowerThirdEnabled
   }
 }
