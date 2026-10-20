@@ -21,11 +21,15 @@ Grab the latest Windows installer from the [Releases page](https://github.com/as
 
 ## Web version
 
-A browser build for quick jobs: pick a video, set a start and end, export the trimmed clip as an H.264 MP4. It runs entirely in your browser (ffmpeg.wasm), so nothing is uploaded, and it works on phones as well as desktops. Use the desktop app for long recordings and everything else (peak detection, reels, captions, branding, audio-track selection).
+A browser build for quick jobs: pick a video, set a start and end, export the trimmed clip as an H.264 MP4. It runs entirely in your browser (ffmpeg.wasm), so nothing is uploaded, and it works on phones as well as desktops. It also carries a little of the desktop branding. Use the desktop app for long recordings and everything else (peak detection, reels, captions, transitions, session history).
 
 - **Large files:** above roughly 500 MB on desktop (200 MB on phones) the page warns that the browser may run out of memory. It never blocks you.
 - **HEVC/H.265 recordings:** whether the picture plays depends on your browser and device (Safari and recent Android Chrome use the device's hardware decoder). If it can't decode the video, the page says so and points you to the desktop app.
 - **Audio:** the page measures every audio track and exports the loudest one (a multi-track recording's first track is often silent or mic-only). When a video has several tracks you can pick a different one from a dropdown. The preview plays the browser's default track, so it may sound different from the export.
+- **Branding:** optional intro and outro cards (your display name and card colour, 1–10 seconds each), a lower-third text strip, and an optional background-music file that is looped, faded and ducked under the clip's own sound. Settings are remembered in your browser; the music file is not. The cards are silent and the music covers the clip only.
+- **Watermark:** the Astrofrags logo is always added to the exported video, on every frame including the cards. You choose which corner it sits in.
+- **Output size:** the export keeps the clip's own shape and size, scaled down to fit within 1920×1080 and never up. (The desktop app letterboxes everything to 1920×1080.) Loudness is always normalised to -16 LUFS, so a clip with no audio gets a silent track.
+- **Time estimate:** the page shows a rough "About N s" before you export. It is a rule of thumb that gets longer for longer clips, bigger pictures, cards and phones.
 
 ```bash
 npm run web:dev     # local dev server

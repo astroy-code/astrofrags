@@ -1,79 +1,17 @@
 import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { execFileSync, spawnSync } from 'node:child_process'
-import { join } from 'node:path'
-import { mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import ffmpegPath from 'ffmpeg-static'
+import {
+  FIXTURE_NAMES,
+  exportAndSave,
+  fixture,
+  meanVolumeDb,
+  pickAndWaitReady,
+  probe,
+  setRange
+} from './support'
 
-// Playwright loads this file as CommonJS, so __dirname is available and import.meta is not.
-const FIXTURE_NAMES: Record<'clip' | 'silent' | 'awkward' | 'audioOnly' | 'twoTrack', string> = JSON.parse(
-  readFileSync(join(__dirname, 'fixtures', 'names.json'), 'utf8')
-)
-const FIXTURE_DIR = join(__dirname, '.fixtures')
-const fixture = (name: string): string => join(FIXTURE_DIR, name)
 const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
-
-interface Probe {
-  readonly videoCodec: string | null
-  readonly hasAudio: boolean
-  readonly durationSeconds: number
-}
-
-/** `ffmpeg -i` exits non-zero without an output but prints the stream listing to stderr. */
-function probe(filePath: string): Probe {
-  let stderr = ''
-  try {
-    execFileSync(ffmpegPath as string, ['-i', filePath], { stdio: 'pipe' })
-  } catch (error) {
-    stderr = String((error as { stderr?: Buffer }).stderr ?? '')
-  }
-  const duration = /Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/.exec(stderr)
-  const [h, m, s] = duration ? duration.slice(1).map(Number) : [0, 0, 0]
-  return {
-    videoCodec: /Video: (\w+)/.exec(stderr)?.[1] ?? null,
-    hasAudio: /Stream #\d+:\d+.*: Audio:/.test(stderr),
-    durationSeconds: h * 3600 + m * 60 + s
-  }
-}
-
-/** Mean loudness of the first audio stream via ffmpeg's volumedetect; -Infinity for digital silence. */
-function meanVolumeDb(filePath: string): number {
-  const { stderr } = spawnSync(
-    ffmpegPath as string,
-    ['-i', filePath, '-vn', '-af', 'volumedetect', '-f', 'null', '-'],
-    { encoding: 'utf8' }
-  )
-  const match = /mean_volume: (-inf|-?[\d.]+) dB/.exec(stderr)
-  if (!match) throw new Error(`volumedetect printed no mean_volume:\n${stderr.slice(-400)}`)
-  return match[1] === '-inf' ? -Infinity : Number(match[1])
-}
-
-async function setRange(page: Page, testId: string, value: number): Promise<void> {
-  await page.getByTestId(testId).evaluate((el, next) => {
-    const input = el as HTMLInputElement
-    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-    setValue?.call(input, String(next))
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-  }, value)
-}
-
-async function pickAndWaitReady(page: Page, fileName: string): Promise<void> {
-  await page.goto('./')
-  await page.getByTestId('file-input').setInputFiles(fixture(fileName))
-  await expect(page.getByTestId('export-button')).toBeEnabled()
-}
-
-async function exportAndSave(page: Page): Promise<{ savedPath: string; suggestedName: string }> {
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    page.getByTestId('export-button').click()
-  ])
-  const savedPath = join(mkdtempSync(join(tmpdir(), 'astrofrags-e2e-')), download.suggestedFilename())
-  await download.saveAs(savedPath)
-  return { savedPath, suggestedName: download.suggestedFilename() }
-}
 
 test('trims a clip and downloads an H.264 mp4', async ({ page }) => {
   await pickAndWaitReady(page, FIXTURE_NAMES.clip)

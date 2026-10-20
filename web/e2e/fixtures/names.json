@@ -3,5 +3,7 @@
   "silent": "silent.webm",
   "awkward": "Valorant 2026 – clip 🎯.webm",
   "audioOnly": "audio-only.mp4",
-  "twoTrack": "two-track.webm"
+  "twoTrack": "two-track.webm",
+  "music": "music.wav",
+  "notAudio": "not-audio.mp3"
 }

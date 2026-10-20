@@ -37,4 +37,12 @@ export function makeFixtures(outDir) {
   ])
   // An MP4 with only an audio track: metadata loads but there are no video dimensions.
   ffmpeg([...AUDIO_SOURCE, '-c:a', 'aac', join(outDir, FIXTURE_NAMES.audioOnly)])
+  // Background music: a 330 Hz tone, shorter than the clips so the loop path is exercised.
+  ffmpeg(['-f', 'lavfi', '-i', 'sine=frequency=330:duration=3', join(outDir, FIXTURE_NAMES.music)])
+  // A picture with an audio file's name: must be rejected as music.
+  ffmpeg([
+    '-f', 'lavfi', '-i', 'color=c=red:s=64x64',
+    '-frames:v', '1', '-f', 'image2', '-c:v', 'png',
+    join(outDir, FIXTURE_NAMES.notAudio)
+  ])
 }
