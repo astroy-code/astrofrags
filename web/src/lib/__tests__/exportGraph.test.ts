@@ -4,7 +4,8 @@ import { buildExportArgs, planDurationSeconds } from '../exportGraph.ts'
 import type { ExportInputs, ExportPlan } from '../exportGraph.ts'
 
 const PLAN: ExportPlan = {
-  clip: { start: 1.5, end: 3.5, audioTrackIndex: 0 },
+  clips: [{ start: 1.5, end: 3.5, audioTrackIndex: 0 }],
+  transition: null,
   output: { width: 320, height: 180 },
   logo: { width: 512, height: 512 },
   watermarkCorner: 'bottom-right',
@@ -15,7 +16,7 @@ const PLAN: ExportPlan = {
   music: false,
   lowerThird: false
 }
-const INPUTS: ExportInputs = { video: 'in.mp4', logo: 'logo.png' }
+const INPUTS: ExportInputs = { videos: ['in.mp4'], logo: 'logo.png' }
 
 const graphOf = (args: string[]): string => args[args.indexOf('-filter_complex') + 1]
 
@@ -83,15 +84,15 @@ test('a plain clip keeps the source frame rate', () => {
 })
 
 test('selects the requested audio track, or generates silence when there is none', () => {
-  const track = graphOf(buildExportArgs({ ...PLAN, clip: { ...PLAN.clip, audioTrackIndex: 2 } }, INPUTS, 'o.mp4'))
+  const track = graphOf(buildExportArgs({ ...PLAN, clips: [{ ...PLAN.clips[0], audioTrackIndex: 2 }] }, INPUTS, 'o.mp4'))
   assert.ok(track.includes('[0:a:2]'))
-  const none = graphOf(buildExportArgs({ ...PLAN, clip: { ...PLAN.clip, audioTrackIndex: null } }, INPUTS, 'o.mp4'))
+  const none = graphOf(buildExportArgs({ ...PLAN, clips: [{ ...PLAN.clips[0], audioTrackIndex: null }] }, INPUTS, 'o.mp4'))
   assert.ok(none.includes('anullsrc'))
   assert.ok(!none.includes('[0:a:'))
 })
 
 test('the music stage uses the desktop loop, bed volume, fades, duck and mix', () => {
-  const plan = { ...PLAN, clip: { start: 0, end: 10, audioTrackIndex: 0 }, music: true }
+  const plan = { ...PLAN, clips: [{ start: 0, end: 10, audioTrackIndex: 0 }], music: true }
   const graph = graphOf(buildExportArgs(plan, { ...INPUTS, music: 'music.wav' }, 'out.mp4'))
   for (const fragment of [
     'aformat=sample_rates=48000:channel_layouts=stereo,aloop=loop=-1:size=2e9',
@@ -121,7 +122,88 @@ test('planDurationSeconds adds a card duration for each card that is on', () => 
 })
 
 test('does not mutate the plan or the inputs', () => {
-  const plan = Object.freeze({ ...PLAN, clip: Object.freeze({ ...PLAN.clip }) })
+  const plan = Object.freeze({ ...PLAN, clips: Object.freeze(PLAN.clips.map((clip) => Object.freeze({ ...clip }))) })
   const inputs = Object.freeze({ ...INPUTS })
   assert.doesNotThrow(() => buildExportArgs(plan, inputs, 'out.mp4'))
+})
+
+// ---- Reels ----
+
+const CLIP_A = { start: 0, end: 4, audioTrackIndex: 0 }
+const CLIP_B = { start: 2, end: 5, audioTrackIndex: null }
+const REEL: ExportPlan = { ...PLAN, clips: [CLIP_A, CLIP_B] }
+const REEL_INPUTS: ExportInputs = { videos: ['a.mp4', 'b.mp4'], logo: 'logo.png' }
+
+test('two clips are two input groups before the music and the logo', () => {
+  const args = buildExportArgs(REEL, REEL_INPUTS, 'out.mp4')
+  assert.deepEqual(args.slice(0, 12), [
+    '-ss', '0.000', '-t', '4.000', '-i', 'a.mp4',
+    '-ss', '2.000', '-t', '3.000', '-i', 'b.mp4'
+  ])
+  assert.ok(graphOf(args).includes('[2:v]scale='), 'the logo is input 2')
+  const withMusic = graphOf(buildExportArgs({ ...REEL, music: true }, { ...REEL_INPUTS, music: 'm.wav' }, 'o.mp4'))
+  assert.ok(withMusic.includes('[2:a]aformat='), 'the music is input 2')
+  assert.ok(withMusic.includes('[3:v]scale='), 'and the logo moves to input 3')
+})
+
+test('a hard cut joins the normalised clips with concat', () => {
+  assert.ok(
+    graphOf(buildExportArgs(REEL, REEL_INPUTS, 'o.mp4')).includes(
+      '[v_0][a_0][v_1][a_1]concat=n=2:v=1:a=1[main_v][main_a]'
+    )
+  )
+})
+
+test('a transition chains xfade and acrossfade with the offset the first clip leaves', () => {
+  const plan = { ...REEL, transition: { seconds: 1, styles: ['wipeleft' as const] } }
+  const graph = graphOf(buildExportArgs(plan, REEL_INPUTS, 'o.mp4'))
+  assert.ok(graph.includes('[v_0][v_1]xfade=transition=wipeleft:duration=1.000:offset=3.000[main_v]'))
+  assert.ok(graph.includes('[a_0][a_1]acrossfade=d=1.000[main_a]'))
+  assert.ok(!graph.includes('concat=n=2'))
+})
+
+test('three clips use cumulative offsets and their own style per join', () => {
+  const plan: ExportPlan = {
+    ...PLAN,
+    clips: [CLIP_A, CLIP_B, { start: 0, end: 2, audioTrackIndex: 0 }],
+    transition: { seconds: 0.5, styles: ['fade', 'zoomin'] }
+  }
+  const graph = graphOf(buildExportArgs(plan, { videos: ['a', 'b', 'c'], logo: 'l.png' }, 'o.mp4'))
+  assert.ok(graph.includes('[v_0][v_1]xfade=transition=fade:duration=0.500:offset=3.500[vx1]'))
+  // 4 + 3 - 0.5 = 6.5 s so far, so the second join starts at 6.0 s.
+  assert.ok(graph.includes('[vx1][v_2]xfade=transition=zoomin:duration=0.500:offset=6.000[main_v]'))
+  assert.ok(graph.includes('[a_0][a_1]acrossfade=d=0.500[ax1]'))
+  assert.ok(graph.includes('[ax1][a_2]acrossfade=d=0.500[main_a]'))
+})
+
+test('a reel normalises every clip even with no cards', () => {
+  const graph = graphOf(buildExportArgs(REEL, REEL_INPUTS, 'o.mp4'))
+  assert.ok(graph.includes('fps=30,format=yuv420p,setpts=PTS-STARTPTS[v_0]'))
+  assert.ok(graph.includes('fps=30,format=yuv420p,setpts=PTS-STARTPTS[v_1]'))
+  assert.ok(graph.includes('[0:a:0]aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp,asetpts=PTS-STARTPTS[a_0]'))
+})
+
+test('a clip with no audio becomes silence of its own length at its own index', () => {
+  const graph = graphOf(buildExportArgs(REEL, REEL_INPUTS, 'o.mp4'))
+  assert.ok(graph.includes('anullsrc=r=48000:cl=stereo,atrim=duration=3.000,asetpts=PTS-STARTPTS[a_1]'))
+  assert.ok(!graph.includes('[1:a:'))
+})
+
+test('the music stage and the plan length follow the whole reel', () => {
+  const music = { ...REEL, music: true }
+  const hard = graphOf(buildExportArgs(music, { ...REEL_INPUTS, music: 'm.wav' }, 'o.mp4'))
+  assert.ok(hard.includes('atrim=0:7.000'))
+  const crossed = { ...music, transition: { seconds: 1, styles: ['fade' as const] } }
+  const graph = graphOf(buildExportArgs(crossed, { ...REEL_INPUTS, music: 'm.wav' }, 'o.mp4'))
+  assert.ok(graph.includes('atrim=0:6.000'))
+  assert.ok(graph.includes('afade=t=out:st=4.000:d=2.000'))
+  assert.equal(planDurationSeconds(crossed), 6)
+  assert.equal(planDurationSeconds({ ...crossed, intro: true, cardSeconds: 3 }), 9)
+})
+
+test('every clip of a reel gets its own reframe labels in a preset', () => {
+  const plan: ExportPlan = { ...REEL, format: 'vertical', output: { width: 1080, height: 1920 } }
+  const graph = graphOf(buildExportArgs(plan, REEL_INPUTS, 'o.mp4'))
+  assert.ok(graph.includes('[0:v:0]split=2[c0_reframe_bg_in][c0_reframe_fg_in]'))
+  assert.ok(graph.includes('[1:v:0]split=2[c1_reframe_bg_in][c1_reframe_fg_in]'))
 })

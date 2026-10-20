@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildExportArgs } from '../exportGraph.ts'
-import type { ExportPlan } from '../exportGraph.ts'
+import type { ClipPlan, ExportPlan } from '../exportGraph.ts'
 import { formatOutputSize } from '../exportFormat.ts'
 import { fitWithin } from '../outputGeometry.ts'
 import { watermarkRect } from '../overlayLayout.ts'
@@ -10,8 +10,12 @@ import { makeFixture, meanVolumeDb, pixelAt, probeBytes, runCore } from './suppo
 const OUTPUT = { width: 320, height: 180 }
 const LOGO = { width: 64, height: 64 }
 
-const basePlan = (overrides: Partial<ExportPlan> = {}): ExportPlan => ({
-  clip: { start: 0, end: 1, audioTrackIndex: 0 },
+/** Overrides for a plan; `clip` is shorthand for a one-clip reel. */
+type PlanOverrides = Partial<ExportPlan> & { readonly clip?: ClipPlan }
+
+const basePlan = ({ clip, ...overrides }: PlanOverrides = {}): ExportPlan => ({
+  clips: [clip ?? { start: 0, end: 1, audioTrackIndex: 0 }],
+  transition: null,
   output: OUTPUT,
   logo: LOGO,
   watermarkCorner: 'bottom-right',
@@ -35,10 +39,17 @@ interface ExportExtras {
   readonly lowerThirdPng?: Uint8Array
 }
 
-async function exportClip(plan: ExportPlan, video: Uint8Array, extras: ExportExtras = {}) {
-  const videoName = extras.videoName ?? 'in.mp4'
+const exportClip = (plan: ExportPlan, video: Uint8Array, extras: ExportExtras = {}) =>
+  exportReel(plan, [video], extras)
+
+/** Runs a plan over one fixture per clip, in order (clip i reads the file `in<i>.mp4`). */
+async function exportReel(plan: ExportPlan, videos: readonly Uint8Array[], extras: ExportExtras = {}) {
+  const videoNames = videos.map((_, i) => (videos.length === 1 ? (extras.videoName ?? 'in.mp4') : `in${i}.mp4`))
   const logo = await makeFixture('png', { color: '#ff0000', width: LOGO.width, height: LOGO.height })
-  const files: Record<string, Uint8Array> = { [videoName]: video, 'logo.png': logo }
+  const files: Record<string, Uint8Array> = { 'logo.png': logo }
+  videos.forEach((video, i) => {
+    files[videoNames[i]] = video
+  })
   if (extras.card) {
     files['intro.png'] = extras.card
     files['outro.png'] = extras.card
@@ -46,7 +57,7 @@ async function exportClip(plan: ExportPlan, video: Uint8Array, extras: ExportExt
   if (extras.music) files['music.wav'] = extras.music
   if (extras.lowerThirdPng) files['lowerthird.png'] = extras.lowerThirdPng
   const inputs = {
-    video: videoName,
+    videos: videoNames,
     logo: 'logo.png',
     ...(plan.intro ? { introCard: 'intro.png' } : {}),
     ...(plan.outro ? { outroCard: 'outro.png' } : {}),
@@ -101,7 +112,7 @@ test('fits a portrait source without distorting or upscaling it', async () => {
   assert.deepEqual([info.width, info.height], [180, 320])
 })
 
-const presetPlan = (format: ExportPlan['format'], overrides: Partial<ExportPlan> = {}): ExportPlan =>
+const presetPlan = (format: ExportPlan['format'], overrides: PlanOverrides = {}): ExportPlan =>
   basePlan({ format, output: formatOutputSize(format, OUTPUT), ...overrides })
 
 for (const format of ['vertical', 'vertical-crop', 'square'] as const) {
@@ -291,4 +302,106 @@ test('cards still work for a clip with no audio', async () => {
   const info = await probeBytes(out, 'out.mp4')
   assert.ok(Math.abs(info.durationSeconds - 7) < 0.25)
   assert.equal(info.audioStreams, 1)
+})
+
+// ---- Reels: several clips joined in one graph ----
+
+const clipOf = (start: number, end: number, audioTrackIndex: number | null = 0): ClipPlan => ({
+  start,
+  end,
+  audioTrackIndex
+})
+
+test('three clips of different sizes and one with no audio join into the output size', async () => {
+  const landscape = await makeFixture('video', { width: 320, height: 180 })
+  const portrait = await makeFixture('video', { width: 180, height: 320 })
+  const noAudio = await makeFixture('videoNoAudio', { width: 640, height: 360 })
+  const plan = basePlan({ clips: [clipOf(0, 1), clipOf(0, 1), clipOf(0, 1, null)] })
+  const info = await probeBytes(await exportReel(plan, [landscape, portrait, noAudio]), 'out.mp4')
+  assert.deepEqual([info.width, info.height], [320, 180])
+  assert.equal(info.audioStreams, 1)
+  assert.ok(Math.abs(info.durationSeconds - 3) < 0.25, `duration ${info.durationSeconds}`)
+})
+
+test('a transition shortens the output by one duration per join', async () => {
+  const video = await makeFixture('video', { duration: 3 })
+  const clips = [clipOf(0, 2), clipOf(0, 2), clipOf(0, 2)]
+  const hard = await probeBytes(await exportReel(basePlan({ clips }), [video, video, video]), 'out.mp4')
+  assert.ok(Math.abs(hard.durationSeconds - 6) < 0.25, `hard cut ${hard.durationSeconds}`)
+  const transition = { seconds: 0.5, styles: ['fade', 'wipeleft'] as const }
+  const faded = await probeBytes(
+    await exportReel(basePlan({ clips, transition }), [video, video, video]),
+    'out.mp4'
+  )
+  assert.ok(Math.abs(faded.durationSeconds - 5) < 0.25, `transition ${faded.durationSeconds}`)
+})
+
+test('a 0.5 s clip with a clamped transition still exports at the right length', async () => {
+  const video = await makeFixture('video', { duration: 3 })
+  const plan = basePlan({
+    clips: [clipOf(0, 0.5), clipOf(0, 2)],
+    transition: { seconds: 0.25, styles: ['dissolve'] }
+  })
+  const info = await probeBytes(await exportReel(plan, [video, video]), 'out.mp4')
+  assert.ok(Math.abs(info.durationSeconds - 2.25) < 0.25, `duration ${info.durationSeconds}`)
+})
+
+test('a 30 fps and a 60 fps clip join', async () => {
+  const slow = await makeFixture('video', { fps: 30 })
+  const fast = await makeFixture('video', { fps: 60 })
+  const plan = basePlan({ clips: [clipOf(0, 1), clipOf(0, 1)] })
+  const info = await probeBytes(await exportReel(plan, [slow, fast]), 'out.mp4')
+  assert.equal(Math.round(info.fps), 30)
+  assert.ok(Math.abs(info.durationSeconds - 2) < 0.25, `duration ${info.durationSeconds}`)
+})
+
+test('cards, music and a transition together keep the exact length', async () => {
+  const video = await makeFixture('video', { duration: 3 })
+  const plan = basePlan({
+    ...WITH_CARDS,
+    intro: true,
+    outro: true,
+    music: true,
+    clips: [clipOf(0, 2), clipOf(0, 2)],
+    transition: { seconds: 1, styles: ['circleopen'] }
+  })
+  const out = await exportReel(plan, [video, video], {
+    card: await cardPng(),
+    music: await makeFixture('tone', { duration: 2 })
+  })
+  const info = await probeBytes(out, 'out.mp4')
+  // 2 + 2 - 1 of clips, plus two 3 s cards.
+  assert.ok(Math.abs(info.durationSeconds - 9) < 0.3, `duration ${info.durationSeconds}`)
+})
+
+test('the sound carries across a join instead of dropping out', async () => {
+  const video = await makeFixture('video', { duration: 3 })
+  const plan = basePlan({
+    clips: [clipOf(0, 2), clipOf(0, 2)],
+    transition: { seconds: 0.5, styles: ['fade'] }
+  })
+  const out = await exportReel(plan, [video, video])
+  assert.ok((await meanVolumeDb(out, 'out.mp4')) > -40)
+})
+
+for (const style of [
+  'fade', 'dissolve', 'wipeleft', 'wiperight', 'slideleft', 'slideright', 'circleopen', 'circleclose', 'pixelize', 'zoomin'
+] as const) {
+  test(`the ${style} transition exports`, async () => {
+    const video = await makeFixture('video', { duration: 2 })
+    const plan = basePlan({
+      clips: [clipOf(0, 1), clipOf(0, 1)],
+      transition: { seconds: 0.25, styles: [style] }
+    })
+    const info = await probeBytes(await exportReel(plan, [video, video]), 'out.mp4')
+    assert.ok(Math.abs(info.durationSeconds - 1.75) < 0.25, `${style}: ${info.durationSeconds}`)
+  })
+}
+
+test('a preset reframes every clip of a reel with its own filter labels', async () => {
+  const landscape = await makeFixture('video')
+  const portrait = await makeFixture('video', { width: 180, height: 320 })
+  const plan = presetPlan('vertical', { clips: [clipOf(0, 1), clipOf(0, 1)] })
+  const info = await probeBytes(await exportReel(plan, [landscape, portrait]), 'out.mp4')
+  assert.deepEqual([info.width, info.height], [1080, 1920])
 })

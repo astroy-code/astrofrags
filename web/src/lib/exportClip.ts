@@ -173,7 +173,8 @@ export async function exportTrimmedClip(req: ExportRequest): Promise<ExportResul
 function buildPlan(req: ExportRequest, logo: Logo): ExportPlan {
   const { branding } = req
   return {
-    clip: { start: req.start, end: req.end, audioTrackIndex: req.audioTrackIndex },
+    clips: [{ start: req.start, end: req.end, audioTrackIndex: req.audioTrackIndex }],
+    transition: null,
     output: formatOutputSize(branding.exportFormat, req.sourceSize),
     logo: logo.size,
     watermarkCorner: branding.watermarkCorner,
@@ -186,7 +187,7 @@ function buildPlan(req: ExportRequest, logo: Logo): ExportPlan {
   }
 }
 
-type BrandingInputs = Omit<ExportInputs, 'video' | 'music'>
+type BrandingInputs = Omit<ExportInputs, 'videos' | 'music'>
 
 /** Writes the logo and any card or overlay images into the ffmpeg filesystem. */
 async function writeBrandingFiles(
@@ -245,7 +246,7 @@ async function runExport(req: ExportRequest): Promise<ExportResult> {
       ...(req.musicFile ? [{ name: MUSIC_NAME, file: req.musicFile }] : [])
     ]
     const exitCode = await withMountedFiles(ffmpeg, mounts, ([video, music]) =>
-      ffmpeg.exec(buildExportArgs(plan, { ...brandingInputs, video, music }, OUTPUT_NAME))
+      ffmpeg.exec(buildExportArgs(plan, { ...brandingInputs, videos: [video], music }, OUTPUT_NAME))
     )
     if (exitCode !== 0) {
       throw new Error(`ffmpeg failed (exit ${exitCode}): ${log.slice(-LOG_TAIL_CHARS)}`)

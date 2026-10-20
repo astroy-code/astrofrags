@@ -50,3 +50,10 @@ test('parseExportFormat accepts the four formats and falls back to original', ()
     assert.equal(parseExportFormat(bad, 'original'), 'original')
   }
 })
+
+test('a label prefix keeps the internal reframe labels unique per clip', () => {
+  const stage = buildReframeStage('vertical', '[1:v:0]', '[x]', 'c1_')
+  assert.ok(stage.startsWith('[1:v:0]split=2[c1_reframe_bg_in][c1_reframe_fg_in];'))
+  assert.ok(stage.includes('[c1_reframe_bg]') && stage.includes('[c1_reframe_fg]'))
+  assert.ok(!stage.includes('[reframe_'))
+})

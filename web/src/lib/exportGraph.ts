@@ -1,22 +1,19 @@
 import type { WatermarkCorner } from './brandingSettings.ts'
-import { buildReframeStage, formatBitrate } from './exportFormat.ts'
+import { formatBitrate } from './exportFormat.ts'
 import type { ExportFormat } from './exportFormat.ts'
+import { FRAME_RATE, RESET_TIMESTAMPS, SILENCE_SOURCE, seconds } from './graphParts.ts'
 import type { Size } from './outputGeometry.ts'
 import { musicFadeSeconds } from './musicFade.ts'
 import { CARD_FADE_SECONDS, watermarkRect } from './overlayLayout.ts'
+import { clipSeconds, reelStages } from './reelGraph.ts'
+import type { ClipPlan, ReelPlan, Transition } from './reelGraph.ts'
+import { reelSeconds } from './transitions.ts'
 
-export interface ExportPlan {
-  readonly clip: {
-    readonly start: number
-    readonly end: number
-    /** Zero-based index among the file's audio streams; null when the clip has no audio. */
-    readonly audioTrackIndex: number | null
-  }
-  /** The final frame size (already fitted within 1920x1080 with even dimensions). */
-  readonly output: Size
+export type { ClipPlan, Transition }
+
+export interface ExportPlan extends ReelPlan {
   readonly logo: Size
   readonly watermarkCorner: WatermarkCorner
-  readonly format: ExportFormat
   readonly intro: boolean
   readonly outro: boolean
   readonly cardSeconds: number
@@ -24,9 +21,9 @@ export interface ExportPlan {
   readonly lowerThird: boolean
 }
 
-/** Paths of the input files in the ffmpeg filesystem. */
+/** Paths of the input files in the ffmpeg filesystem. `videos` is in the same order as the plan's clips. */
 export interface ExportInputs {
-  readonly video: string
+  readonly videos: readonly string[]
   readonly logo: string
   readonly introCard?: string
   readonly outroCard?: string
@@ -35,12 +32,6 @@ export interface ExportInputs {
 }
 
 const LOUDNORM = 'loudnorm=I=-16:TP=-1.5:LRA=11'
-// Fixed sample format too: concat needs every segment's audio to match exactly.
-const STEREO_48K = 'aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp'
-const SILENCE_SOURCE = 'anullsrc=r=48000:cl=stereo'
-// concat needs matching frame rates across segments; this is also desktop's card frame rate.
-const CARD_FRAME_RATE = 30
-const RESET_TIMESTAMPS = 'setpts=PTS-STARTPTS'
 
 /** Constant quality for the original format; a preset targets its bitrate, as on desktop. */
 function encodeArgs(format: ExportFormat): string[] {
@@ -53,35 +44,14 @@ function encodeArgs(format: ExportFormat): string[] {
   ]
 }
 
-const seconds = (value: number): string => value.toFixed(3)
+/** Length of the joined clips: their sum, less the overlap each transition eats. */
+function reelLength(plan: ExportPlan): number {
+  return reelSeconds(plan.clips.map(clipSeconds), plan.transition?.seconds ?? null)
+}
 
 export function planDurationSeconds(plan: ExportPlan): number {
   const cards = (plan.intro ? plan.cardSeconds : 0) + (plan.outro ? plan.cardSeconds : 0)
-  return plan.clip.end - plan.clip.start + cards
-}
-
-function mainVideoStage(plan: ExportPlan, cardsOn: boolean): string {
-  const { width, height } = plan.output
-  // The original format fits the clip inside the frame; a preset reframes it the desktop way.
-  const fit =
-    plan.format === 'original'
-      ? `[0:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`
-      : `${buildReframeStage(plan.format, '[0:v:0]', '[reframed]')};[reframed]setsar=1`
-  // With cards the clip must match them for concat: 30 fps, yuv420p, timestamps from zero.
-  return cardsOn
-    ? `${fit},fps=${CARD_FRAME_RATE},format=yuv420p,${RESET_TIMESTAMPS}[main_v]`
-    : `${fit}[main_v]`
-}
-
-/** The chosen track, or generated silence so the graph is uniform when the clip has no audio. */
-function mainAudioStage(plan: ExportPlan, cardsOn: boolean): string {
-  const { audioTrackIndex, start, end } = plan.clip
-  const tail = cardsOn ? 'asetpts=PTS-STARTPTS' : 'anull'
-  if (audioTrackIndex === null) {
-    return `${SILENCE_SOURCE},atrim=duration=${seconds(end - start)},asetpts=PTS-STARTPTS[main_a]`
-  }
-  return `[0:a:${audioTrackIndex}]${STEREO_48K},${tail}[main_a]`
+  return reelLength(plan) + cards
 }
 
 interface Labels {
@@ -91,20 +61,20 @@ interface Labels {
 }
 
 /**
- * The desktop music bed (exportReel.ts buildMusicStage), built on the clip audio only: loop the
- * track to cover the clip, drop it to a quiet bed, fade the ends, duck it under the clip's own
- * audio with sidechain compression, and mix. asplit gives the clip audio the two copies the
+ * The desktop music bed (exportReel.ts buildMusicStage), built on the reel's audio only: loop the
+ * track to cover the reel, drop it to a quiet bed, fade the ends, duck it under the reel's own
+ * audio with sidechain compression, and mix. asplit gives the reel audio the two copies the
  * sidechain trigger and the final mix each need.
  */
-function musicStages(plan: ExportPlan, musicIndex: number, clipAudioLabel: string): Labels {
-  const clipSeconds = plan.clip.end - plan.clip.start
-  const fade = musicFadeSeconds(clipSeconds)
-  const fadeOutStart = Math.max(clipSeconds - fade, 0)
+function musicStages(plan: ExportPlan, musicIndex: number, reelAudioLabel: string): Labels {
+  const length = reelLength(plan)
+  const fade = musicFadeSeconds(length)
+  const fadeOutStart = Math.max(length - fade, 0)
   return {
     stages: [
-      `${clipAudioLabel}asplit=2[dry][sidechain]`,
+      `${reelAudioLabel}asplit=2[dry][sidechain]`,
       `[${musicIndex}:a]aformat=sample_rates=48000:channel_layouts=stereo,aloop=loop=-1:size=2e9,` +
-        `atrim=0:${seconds(clipSeconds)},asetpts=PTS-STARTPTS,volume=0.35,` +
+        `atrim=0:${seconds(length)},asetpts=PTS-STARTPTS,volume=0.35,` +
         `afade=t=in:st=0:d=${seconds(fade)},afade=t=out:st=${seconds(fadeOutStart)}:d=${seconds(fade)}[music]`,
       '[music][sidechain]sidechaincompress=threshold=0.05:ratio=8:attack=5:release=300[ducked_music]',
       '[dry][ducked_music]amix=inputs=2:duration=first[music_mix_a]'
@@ -125,23 +95,23 @@ function cardStages(kind: 'intro' | 'outro', inputIndex: number, plan: ExportPla
   const { width, height } = plan.output
   return [
     `[${inputIndex}:v]fade=t=in:st=0:d=${fade},fade=t=out:st=${seconds(plan.cardSeconds - fade)}:d=${fade},` +
-      `scale=${width}:${height},setsar=1,fps=${CARD_FRAME_RATE},format=yuv420p,${RESET_TIMESTAMPS}[${kind}_v]`,
+      `scale=${width}:${height},setsar=1,fps=${FRAME_RATE},format=yuv420p,${RESET_TIMESTAMPS}[${kind}_v]`,
     `${SILENCE_SOURCE},atrim=duration=${seconds(plan.cardSeconds)},asetpts=PTS-STARTPTS[${kind}_a]`
   ]
 }
 
-/** Joins intro, the main clip and outro (whichever are on) with concat. */
+/** Joins intro, the reel and outro (whichever are on) with concat. */
 function withCards(
   plan: ExportPlan,
   inputs: ExportInputs,
   addInput: (args: string[]) => number,
-  clipAudioLabel: string
+  reelAudioLabel: string
 ): Labels {
   const segments: string[] = []
   const stages: string[] = []
   const addCard = (kind: 'intro' | 'outro', path: string | undefined): void => {
     const index = addInput([
-      '-loop', '1', '-framerate', String(CARD_FRAME_RATE),
+      '-loop', '1', '-framerate', String(FRAME_RATE),
       '-t', seconds(plan.cardSeconds), '-i', requireCard(path, kind)
     ])
     stages.push(...cardStages(kind, index, plan))
@@ -149,31 +119,35 @@ function withCards(
   }
 
   if (plan.intro) addCard('intro', inputs.introCard)
-  segments.push(`[main_v]${clipAudioLabel}`)
+  segments.push(`[main_v]${reelAudioLabel}`)
   if (plan.outro) addCard('outro', inputs.outroCard)
   stages.push(`${segments.join('')}concat=n=${segments.length}:v=1:a=1[carded_v][carded_a]`)
   return { stages, videoLabel: '[carded_v]', audioLabel: '[carded_a]' }
 }
 
 /**
- * One ffmpeg command for the whole export: the clip, then (in later stages of the build) music,
- * intro/outro cards, the watermark, and the lower-third, with loudness normalization last.
+ * One ffmpeg command for the whole export: the clips joined (cut or crossfade), then music,
+ * intro/outro cards, the watermark and the lower-third, with loudness normalization last.
  */
 export function buildExportArgs(plan: ExportPlan, inputs: ExportInputs, outputPath: string): string[] {
-  const clipSeconds = plan.clip.end - plan.clip.start
-  const inputArgs = ['-ss', seconds(plan.clip.start), '-t', seconds(clipSeconds), '-i', inputs.video]
-  let nextInputIndex = 1
+  if (inputs.videos.length !== plan.clips.length) {
+    throw new Error('Every clip needs its own video file.')
+  }
+  const inputArgs = plan.clips.flatMap((clip, i) => [
+    '-ss', seconds(clip.start), '-t', seconds(clipSeconds(clip)), '-i', inputs.videos[i]
+  ])
+  let nextInputIndex = plan.clips.length
   const addInput = (args: string[]): number => {
     inputArgs.push(...args)
     return nextInputIndex++
   }
 
   const cardsOn = plan.intro || plan.outro
-  const stages = [mainVideoStage(plan, cardsOn), mainAudioStage(plan, cardsOn)]
+  const stages = reelStages(plan, cardsOn)
   let videoLabel = '[main_v]'
   let audioLabel = '[main_a]'
 
-  // Music sits on the clip only, before the cards are joined, so the cards stay silent.
+  // Music sits on the reel only, before the cards are joined, so the cards stay silent.
   if (plan.music) {
     if (!inputs.music) throw new Error('The music file is missing.')
     const music = musicStages(plan, addInput(['-i', inputs.music]), audioLabel)

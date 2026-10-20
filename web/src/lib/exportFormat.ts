@@ -45,7 +45,12 @@ export function formatBitrate(format: ExportFormat): string | null {
  * Desktop's reframe (exportPresets.ts buildReframeFilter): bars mode puts a blurred fill copy
  * behind a sharp copy scaled to fit; crop mode fills the canvas and trims the overflow.
  */
-export function buildReframeStage(format: ExportFormat, inLabel: string, outLabel: string): string {
+export function buildReframeStage(
+  format: ExportFormat,
+  inLabel: string,
+  outLabel: string,
+  prefix = ''
+): string {
   if (format === 'original') throw new Error('The original format has no reframe stage.')
   const { width, height } = PRESETS[format].size
 
@@ -53,10 +58,10 @@ export function buildReframeStage(format: ExportFormat, inLabel: string, outLabe
     return `${inLabel}scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}${outLabel}`
   }
   return (
-    `${inLabel}split=2[reframe_bg_in][reframe_fg_in];` +
-    `[reframe_bg_in]scale=${width}:${height}:force_original_aspect_ratio=increase,` +
-    `crop=${width}:${height},gblur=sigma=${BLUR_SIGMA}[reframe_bg];` +
-    `[reframe_fg_in]scale=${width}:${height}:force_original_aspect_ratio=decrease[reframe_fg];` +
-    `[reframe_bg][reframe_fg]overlay=(W-w)/2:(H-h)/2${outLabel}`
+    `${inLabel}split=2[${prefix}reframe_bg_in][${prefix}reframe_fg_in];` +
+    `[${prefix}reframe_bg_in]scale=${width}:${height}:force_original_aspect_ratio=increase,` +
+    `crop=${width}:${height},gblur=sigma=${BLUR_SIGMA}[${prefix}reframe_bg];` +
+    `[${prefix}reframe_fg_in]scale=${width}:${height}:force_original_aspect_ratio=decrease[${prefix}reframe_fg];` +
+    `[${prefix}reframe_bg][${prefix}reframe_fg]overlay=(W-w)/2:(H-h)/2${outLabel}`
   )
 }
