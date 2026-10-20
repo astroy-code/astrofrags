@@ -61,10 +61,12 @@ function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
   })
 }
 
+export type CardStyle = Pick<BrandingSettings, 'displayName' | 'accentColor'>
+
 /** Draws an intro/outro card: accent background, centred logo, and the display name below it. */
 export function drawCard(
   ctx: CanvasRenderingContext2D,
-  settings: BrandingSettings,
+  settings: CardStyle,
   size: Size,
   logo: Logo
 ): void {

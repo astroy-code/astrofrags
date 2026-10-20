@@ -182,3 +182,61 @@ button.primary {
 .error-text {
   color: var(--error-fg);
 }
+
+.branding-options,
+.music-picker {
+  margin: var(--gutter) 0 0;
+  padding: var(--gutter);
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: var(--radius);
+}
+
+.branding-options legend {
+  padding: 0 4px;
+}
+
+.branding-options label,
+.music-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.branding-options label.check {
+  flex-direction: row;
+  align-items: center;
+  min-height: 44px;
+}
+
+.branding-options input[type='text'],
+.branding-options input[type='number'],
+.branding-options select {
+  min-height: 44px;
+  font: inherit;
+}
+
+.branding-options input[type='checkbox'] {
+  width: 24px;
+  height: 24px;
+}
+
+.branding-options input[type='color'] {
+  width: 64px;
+  min-height: 44px;
+}
+
+.hint {
+  margin: 4px 0 0;
+  font-size: 0.875rem;
+  opacity: 0.75;
+}
+
+.card-preview {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  margin-top: var(--gutter);
+  border-radius: var(--radius);
+}

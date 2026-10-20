@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AudioTrackPicker } from './components/AudioTrackPicker.tsx'
+import { BrandingOptions } from './components/BrandingOptions.tsx'
+import { CardPreview } from './components/CardPreview.tsx'
 import { ExportBar } from './components/ExportBar.tsx'
+import { MusicPicker } from './components/MusicPicker.tsx'
 import type { ExportState } from './components/ExportBar.tsx'
 import { FilePicker } from './components/FilePicker.tsx'
 import { Notice } from './components/Notice.tsx'
@@ -9,10 +12,12 @@ import type { VideoMetadata } from './components/TrimPlayer.tsx'
 import { isSilent, pickLoudestTrack } from './lib/audioLevels.ts'
 import type { TrackLevel } from './lib/audioLevels.ts'
 import { deliverClip } from './lib/deliverClip.ts'
+import { estimateExportSeconds } from './lib/estimate.ts'
 import { shouldAutoDeliver } from './lib/deliveryPolicy.ts'
 import { ExportCancelledError, exportTrimmedClip, probeAudioTracks } from './lib/exportClip.ts'
 import { isPreviewUndecodable, UNDECODABLE_MESSAGE } from './lib/previewSupport.ts'
 import { checkFileSize, detectPlatform, parseLimitOverride, SOFT_LIMIT_BYTES } from './lib/sizeLimit.ts'
+import { fitWithin } from './lib/outputGeometry.ts'
 import type { Size } from './lib/outputGeometry.ts'
 import { validateTrimRange } from './lib/trimRange.ts'
 import type { TrimRange } from './lib/trimRange.ts'
@@ -32,6 +37,8 @@ interface Session {
   readonly sizeWarningDismissed: boolean
   /** The video's displayed size; 0x0 until the preview reports it. */
   readonly videoSize: Size
+  /** Background music for this export only; never persisted. */
+  readonly musicFile: File | null
 }
 
 interface ExportedClip {
@@ -53,7 +60,8 @@ function newSession(file: File): Session {
     audioTrackOverride: null,
     previewBroken: false,
     sizeWarningDismissed: false,
-    videoSize: { width: 0, height: 0 }
+    videoSize: { width: 0, height: 0 },
+    musicFile: null
   }
 }
 
@@ -82,8 +90,7 @@ function applyMetadata(session: Session, metadata: VideoMetadata): Session {
 export function App(): JSX.Element {
   const platform = useMemo(() => detectPlatform(navigator.userAgent, navigator.maxTouchPoints), [])
   const limits = useMemo(() => parseLimitOverride(window.location.search) ?? SOFT_LIMIT_BYTES, [])
-  const [branding] = useBrandingSettings()
-  // Music is picked per export and never persisted (see the branding design).
+  const [branding, updateBranding] = useBrandingSettings()
   const [session, setSession] = useState<Session | null>(null)
   const [exportState, setExportState] = useState<ExportState>(IDLE)
   const abortRef = useRef<AbortController | null>(null)
@@ -126,7 +133,7 @@ export function App(): JSX.Element {
         duration: session.duration,
         audioTrackIndex: selectedTrack(session),
         branding,
-        musicFile: null,
+        musicFile: session.musicFile,
         sourceSize: session.videoSize,
         onProgress: (progress) =>
           setExportState((current) => (current.phase === 'running' ? { phase: 'running', progress } : current)),
@@ -174,6 +181,19 @@ export function App(): JSX.Element {
     session.audioProbeDone &&
     session.audioLevels.length > 0 &&
     session.audioLevels.every(isSilent)
+  const estimateSeconds =
+    session !== null && canExport
+      ? estimateExportSeconds({
+          durationSeconds:
+            session.range.end -
+            session.range.start +
+            (branding.introEnabled ? branding.cardDurationSeconds : 0) +
+            (branding.outroEnabled ? branding.cardDurationSeconds : 0),
+          output: fitWithin(session.videoSize),
+          hasCards: branding.introEnabled || branding.outroEnabled,
+          platform
+        })
+      : null
   const sizeWarning =
     session !== null && !session.sizeWarningDismissed && checkFileSize(session.file.size, platform, limits) === 'warn'
 
@@ -225,6 +245,25 @@ export function App(): JSX.Element {
             setSession((current) => (current ? { ...current, audioTrackOverride } : current))
           }
         />
+      )}
+
+      {session && (
+        <>
+          <BrandingOptions settings={branding} onChange={updateBranding} />
+          {(branding.introEnabled || branding.outroEnabled) && <CardPreview style={branding} />}
+          <MusicPicker
+            musicFile={session.musicFile}
+            onChange={(musicFile) =>
+              setSession((current) => (current && current.file === session.file ? { ...current, musicFile } : current))
+            }
+          />
+        </>
+      )}
+
+      {session && estimateSeconds !== null && exportState.phase !== 'running' && (
+        <p className="hint" data-testid="export-estimate">
+          About {estimateSeconds} s
+        </p>
       )}
 
       {session && (

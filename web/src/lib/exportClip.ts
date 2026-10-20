@@ -95,6 +95,16 @@ async function readStreamListing(ffmpeg: FFmpeg, inputPath: string): Promise<str
   return log
 }
 
+/** How many audio streams a picked file has; used to reject a music file that is not audio. */
+export function countAudioStreamsOfFile(file: File): Promise<number> {
+  return runExclusive(async () => {
+    const ffmpeg = await getFFmpeg()
+    return withMountedFile(ffmpeg, file, async (inputPath) =>
+      countAudioStreams(await readStreamListing(ffmpeg, inputPath))
+    )
+  })
+}
+
 /** Decodes one track and measures it; a track that fails to decode counts as silent. */
 async function measureTrack(ffmpeg: FFmpeg, inputPath: string, trackIndex: number): Promise<TrackLevel> {
   try {
