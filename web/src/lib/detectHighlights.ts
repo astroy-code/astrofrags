@@ -2,8 +2,8 @@ import { runAbortable } from './abortableTask.ts'
 import { buildHighlightDecodeArgs } from './ffmpegArgs.ts'
 import { getFFmpeg, resetFFmpeg, runExclusive } from './ffmpegInstance.ts'
 import { withMountedFile } from './exportClip.ts'
-import { peaksFromChunks } from './highlights.ts'
-import type { Peak } from './highlights.ts'
+import { scanChunks } from './highlights.ts'
+import type { HighlightScan } from './highlights.ts'
 import { progressRatio } from './progress.ts'
 
 const PCM_FILE = 'highlights.pcm'
@@ -25,7 +25,7 @@ export interface DetectRequest {
 }
 
 /** Decodes one audio track of a picked file and returns its loudest moments, strongest first. */
-export function detectHighlights(req: DetectRequest): Promise<readonly Peak[]> {
+export function detectHighlights(req: DetectRequest): Promise<HighlightScan> {
   return runAbortable({
     enqueue: runExclusive,
     task: () => decode(req),
@@ -35,7 +35,7 @@ export function detectHighlights(req: DetectRequest): Promise<readonly Peak[]> {
   })
 }
 
-async function decode({ file, trackIndex, durationSeconds, onProgress, signal }: DetectRequest): Promise<readonly Peak[]> {
+async function decode({ file, trackIndex, durationSeconds, onProgress, signal }: DetectRequest): Promise<HighlightScan> {
   const ffmpeg = await getFFmpeg()
   if (signal?.aborted) throw new HighlightsCancelledError()
   let chunkIndex = 0
@@ -48,7 +48,7 @@ async function decode({ file, trackIndex, durationSeconds, onProgress, signal }:
     // The file is mounted once; each chunk of it is decoded, measured and dropped in turn, so only
     // about ten minutes of audio is ever held, however long the recording is.
     return await withMountedFile(ffmpeg, file, (inputPath) =>
-      peaksFromChunks({
+      scanChunks({
         durationSeconds,
         decode: async (chunk, index, count) => {
           chunkIndex = index

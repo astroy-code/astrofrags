@@ -21,6 +21,8 @@ export interface ClipItem {
   readonly sizeWarningDismissed: boolean
   /** The loudest moments found in this clip's audio; null until "Find highlights" has run. */
   readonly highlights: readonly Peak[] | null
+  /** Loudness of every 0.1 s of the recording from the same scan, for the waveform; null until scanned. */
+  readonly loudness: Float32Array | null
   /** The video's displayed size; 0x0 until the preview reports it. */
   readonly videoSize: Size
 }
@@ -53,6 +55,7 @@ export function createClip(file: File, objectUrl: string): NewClip {
     previewBroken: false,
     sizeWarningDismissed: false,
     highlights: null,
+    loudness: null,
     videoSize: { width: 0, height: 0 }
   }
 }
@@ -82,6 +85,7 @@ export function clipFromRange(source: ClipItem, objectUrl: string, range: TrimRa
     sizeWarningDismissed: true,
     // The list stays on screen after a tap, so the next moment is one tap away.
     highlights: source.highlights,
+    loudness: source.loudness,
     videoSize: source.videoSize
   }
 }

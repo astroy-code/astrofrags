@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildHighlightDecodeArgs } from '../ffmpegArgs.ts'
-import { pcmPeaks, peaksFromChunks } from '../highlights.ts'
+import { pcmPeaks, scanChunks } from '../highlights.ts'
 import { makeBurstClip, makeFixture, runCore } from './support/ffmpegCore.ts'
 
 async function peaksOf(clip: Uint8Array) {
@@ -49,7 +49,7 @@ test('pcm that starts at an odd offset in its buffer is read the same', () => {
 test('decoding a recording in chunks finds the same moments, even one that straddles a chunk edge', async () => {
   const clip = await makeBurstClip({ seconds: 30, bursts: [8, 9.8, 24] })
   const whole = await peaksOf(clip)
-  const chunked = await peaksFromChunks({
+  const { peaks: chunked } = await scanChunks({
     durationSeconds: 30,
     chunkSeconds: 10,
     decode: async ({ start, length }) => {

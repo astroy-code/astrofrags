@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chooseHighlights, findPeaks, peakRange, peaksFromChunks, planChunks, rmsPerWindow, windowsOfChunk } from '../highlights.ts'
+import { chooseHighlights, findPeaks, peakRange, scanChunks, planChunks, rmsPerWindow, windowsOfChunk } from '../highlights.ts'
 import type { Peak } from '../highlights.ts'
 
 const close = (actual: number, expected: number, tolerance = 1e-6): void =>
@@ -152,7 +152,7 @@ function chunkPcm(seconds: number, at: number | null, extraSamples = 0): Uint8Ar
 
 test('peaks found chunk by chunk land at their time in the whole recording', async () => {
   const bursts: Record<number, number | null> = { 0: 3, 1: null, 2: 3 }
-  const peaks = await peaksFromChunks({
+  const { peaks } = await scanChunks({
     durationSeconds: 25,
     chunkSeconds: 10,
     decode: async (chunk, index) => chunkPcm(chunk.length, bursts[index] ?? null)
@@ -164,7 +164,7 @@ test('peaks found chunk by chunk land at their time in the whole recording', asy
 })
 
 test('a decoder that returns an extra sample per chunk does not drift later peaks', async () => {
-  const peaks = await peaksFromChunks({
+  const { peaks } = await scanChunks({
     durationSeconds: 40,
     chunkSeconds: 10,
     decode: async (chunk, index) => chunkPcm(chunk.length, index === 3 ? 5 : null, 1)
@@ -175,7 +175,7 @@ test('a decoder that returns an extra sample per chunk does not drift later peak
 
 test('a chunk that fails to decode fails the whole search', async () => {
   await assert.rejects(
-    peaksFromChunks({
+    scanChunks({
       durationSeconds: 20,
       chunkSeconds: 10,
       decode: async (_chunk, index) => {
@@ -190,7 +190,7 @@ test('a chunk that fails to decode fails the whole search', async () => {
 test('the chunks are asked for in order, one at a time', async () => {
   const asked: number[] = []
   let running = 0
-  await peaksFromChunks({
+  await scanChunks({
     durationSeconds: 30,
     chunkSeconds: 10,
     decode: async (chunk, index) => {
@@ -203,4 +203,18 @@ test('the chunks are asked for in order, one at a time', async () => {
     }
   })
   assert.deepEqual(asked, [0, 1, 2])
+})
+
+test('the scan keeps one loudness value per 0.1 s over the whole recording', async () => {
+  const { loudness } = await scanChunks({
+    durationSeconds: 25,
+    chunkSeconds: 10,
+    decode: async (chunk, index) => chunkPcm(chunk.length, index === 1 ? 2 : null)
+  })
+  assert.ok(loudness instanceof Float32Array)
+  assert.equal(loudness.length, 250)
+  // The burst is 2 s into the second chunk, so 12 s in: windows 120..123 are loud, the rest quiet.
+  assert.ok(loudness[121] > 0.5)
+  assert.ok(loudness[50] < 0.01)
+  assert.ok(loudness[200] < 0.01)
 })

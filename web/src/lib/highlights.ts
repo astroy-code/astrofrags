@@ -106,12 +106,19 @@ export interface ChunkedRequest {
   readonly decode: (chunk: Chunk, index: number, count: number) => Promise<Uint8Array>
 }
 
-/** Finds peaks of a whole recording while holding only one chunk of audio at a time. */
-export async function peaksFromChunks({
+export interface HighlightScan {
+  /** The loudest moments, strongest first. */
+  readonly peaks: Peak[]
+  /** Loudness (RMS) of every 0.1 s window of the recording, for drawing a waveform. */
+  readonly loudness: Float32Array
+}
+
+/** Scans a whole recording for its loudest moments while holding only one chunk of audio at a time. */
+export async function scanChunks({
   durationSeconds,
   chunkSeconds = HIGHLIGHT_CHUNK_SECONDS,
   decode
-}: ChunkedRequest): Promise<Peak[]> {
+}: ChunkedRequest): Promise<HighlightScan> {
   const chunks = planChunks(durationSeconds, chunkSeconds)
   const windows: number[] = []
   for (const [index, chunk] of chunks.entries()) {
@@ -120,7 +127,7 @@ export async function peaksFromChunks({
     const expected = isLast ? null : Math.round(chunk.length / WINDOW_SECONDS)
     for (const value of windowsOfChunk(pcm, expected)) windows.push(value)
   }
-  return findPeaks(windows)
+  return { peaks: findPeaks(windows), loudness: Float32Array.from(windows) }
 }
 
 /** The clip that frames a moment: 5 s before to 3 s after, kept inside the recording. */

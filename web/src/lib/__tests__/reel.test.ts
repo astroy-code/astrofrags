@@ -243,3 +243,15 @@ test('a late highlights result for a removed clip is dropped', () => {
   const reel = removeClip(three(), 2)
   assert.equal(updateClip(reel, 2, { highlights: [{ time: 1, score: 1 }] }), reel)
 })
+
+test('a new clip has no loudness yet, and a clip from a range shares the recording\'s', () => {
+  assert.equal(item('a').loudness, null)
+  const loudness = new Float32Array([0.1, 0.5, 0.2])
+  const source = addClips(emptyReel(), [{ ...probed('rec'), loudness }]).clips[0]
+  assert.equal(clipFromRange(source, 'blob:new', { start: 1, end: 2 }).loudness, loudness)
+})
+
+test('a late loudness result for a removed clip is dropped', () => {
+  const reel = removeClip(three(), 2)
+  assert.equal(updateClip(reel, 2, { loudness: new Float32Array(1) }), reel)
+})

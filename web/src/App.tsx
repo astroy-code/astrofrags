@@ -161,7 +161,7 @@ export function App(): JSX.Element {
       setHighlightError(null)
       setHighlightRun({ clipId: clip.id, progress: 0 })
       try {
-        const peaks = await detectHighlights({
+        const scan = await detectHighlights({
           file: clip.file,
           trackIndex,
           durationSeconds: clip.duration,
@@ -169,7 +169,7 @@ export function App(): JSX.Element {
             setHighlightRun((current) => (current?.clipId === clip.id ? { clipId: clip.id, progress } : current)),
           signal: controller.signal
         })
-        if (!controller.signal.aborted) actions.setHighlights(clip.id, peaks)
+        if (!controller.signal.aborted) actions.setHighlights(clip.id, scan)
       } catch (error) {
         if (!(error instanceof HighlightsCancelledError) && !controller.signal.aborted) {
           setHighlightError({
