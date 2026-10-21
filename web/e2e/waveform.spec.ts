@@ -169,8 +169,10 @@ test('tapping the marker of a moment clip again, or adding a clip at its own mom
   await page.mouse.click(marker.x, marker.y)
   await expect(page.getByTestId('clip-item')).toHaveCount(2)
 
-  const inside = await xAt(canvas, 11)
-  await page.mouse.click(inside.x, inside.y)
+  // The playhead is inside the moment clip, so adding a clip there selects the one that is there.
+  await page.getByTestId('player').evaluate((video) => {
+    ;(video as HTMLVideoElement).currentTime = 11
+  })
   await page.getByTestId('add-clip-here').click()
   await expect(page.getByTestId('clip-item')).toHaveCount(2)
 })
