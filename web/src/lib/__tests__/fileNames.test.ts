@@ -24,3 +24,10 @@ test('a reel is named after the first clip and the clip count', () => {
 test('a reel name falls back to "clip" when nothing safe remains', () => {
   assert.equal(reelFileName('🎯.mov', 2), 'clip-reel-2-clips.mp4')
 })
+
+test('a very long original name is cut so the file name stays within common limits', () => {
+  const long = `${'a'.repeat(300)}.mp4`
+  assert.ok(trimmedFileName(long, 1, 2).length <= 100)
+  assert.ok(reelFileName(long, 3).length <= 100)
+  assert.match(trimmedFileName(long, 1, 2), /^a+-trim-1s-2s\.mp4$/)
+})

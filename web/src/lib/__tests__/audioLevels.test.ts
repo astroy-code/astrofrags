@@ -60,3 +60,10 @@ test('levelToPercent maps -60 dBFS..0 dBFS onto 0..100', () => {
   assert.equal(levelToPercent(level(1)), 100)
   assert.equal(levelToPercent(level(0.1)), 67)
 })
+
+test('a chosen track that does not exist falls back to the loudest one', () => {
+  const levels = [{ rms: 0.01, peak: 0.1 }, { rms: 0.2, peak: 0.5 }]
+  assert.equal(chooseAudioTrack({ trackCount: 2, levels, override: 5 }), 1)
+  assert.equal(chooseAudioTrack({ trackCount: 2, levels, override: -1 }), 1)
+  assert.equal(chooseAudioTrack({ trackCount: 2, levels, override: 0 }), 0)
+})

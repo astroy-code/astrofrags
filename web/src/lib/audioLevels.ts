@@ -50,7 +50,8 @@ export interface AudioChoiceInput {
 export function chooseAudioTrack({ trackCount, levels, override }: AudioChoiceInput): number | null {
   if (trackCount === 0) return null
   if (trackCount === null) return override ?? 0
-  return override ?? pickLoudestTrack(levels)
+  const valid = override !== null && Number.isInteger(override) && override >= 0 && override < trackCount
+  return valid ? override : pickLoudestTrack(levels)
 }
 
 /** Maps -60 dBFS..0 dBFS onto 0..100 for a level meter. */

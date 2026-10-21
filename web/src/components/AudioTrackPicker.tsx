@@ -4,6 +4,7 @@ import type { TrackLevel } from '../lib/audioLevels.ts'
 interface AudioTrackPickerProps {
   readonly levels: readonly TrackLevel[]
   readonly selected: number
+  readonly locked: boolean
   readonly onSelect: (trackIndex: number) => void
 }
 
@@ -12,7 +13,7 @@ function optionLabel(level: TrackLevel, index: number, loudest: number): string 
   return `Track ${index + 1} · ${detail}${index === loudest ? ' · loudest' : ''}`
 }
 
-export function AudioTrackPicker({ levels, selected, onSelect }: AudioTrackPickerProps): JSX.Element {
+export function AudioTrackPicker({ levels, selected, locked, onSelect }: AudioTrackPickerProps): JSX.Element {
   const loudest = pickLoudestTrack(levels)
   return (
     <div className="audio-track">
@@ -21,6 +22,7 @@ export function AudioTrackPicker({ levels, selected, onSelect }: AudioTrackPicke
         <select
           data-testid="audio-track"
           value={selected}
+          disabled={locked}
           onChange={(event) => onSelect(Number(event.target.value))}
         >
           {levels.map((level, index) => (

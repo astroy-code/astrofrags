@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AudioTrackPicker } from './components/AudioTrackPicker.tsx'
 import { BrandingOptions } from './components/BrandingOptions.tsx'
 import { CardPreview } from './components/CardPreview.tsx'
@@ -193,6 +193,19 @@ export function App(): JSX.Element {
     reel.clips.forEach((clip, index) => actions.patch(clip.id, { range: fitted[index] }))
   }, [branding, reel.clips, actions])
 
+  // A finished (or failed) export describes the reel as it was; any real edit makes it stale.
+  const exportKey = JSON.stringify([
+    reel.clips.map((clip) => [clip.id, clip.range, trackOf(clip)]),
+    reel.musicFile?.name,
+    reel.musicFile?.size,
+    reel.muteOriginal,
+    branding
+  ])
+  useEffect(() => {
+    exportedRef.current = null
+    setExportState((current) => (current.phase === 'done' || current.phase === 'error' ? IDLE : current))
+  }, [exportKey])
+
   const totalBytes = reel.clips.reduce((sum, clip) => sum + clip.file.size, 0)
   const sizeWarning = selected !== null && !selected.sizeWarningDismissed && checkFileSize(selected.file.size, platform, limits) === 'warn'
   const totalWarning = reel.clips.length > 1 && checkFileSize(totalBytes, platform, limits) === 'warn'
@@ -307,6 +320,7 @@ export function App(): JSX.Element {
         <AudioTrackPicker
           levels={selected.audioLevels}
           selected={trackOf(selected) ?? 0}
+          locked={running}
           onSelect={(audioTrackOverride) => actions.patch(selected.id, { audioTrackOverride })}
         />
       )}
@@ -340,6 +354,7 @@ export function App(): JSX.Element {
       {hasClips && (
         <ExportBar
           canExport={canExport}
+          clipCount={reel.clips.length}
           state={exportState}
           onExport={() => void handleExport()}
           onCancel={() => abortRef.current?.abort()}

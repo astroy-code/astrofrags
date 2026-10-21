@@ -71,6 +71,14 @@ export function TransitionOptions({
             const seconds = event.target.valueAsNumber
             if (Number.isFinite(seconds)) onChange({ transitionSeconds: seconds })
           }}
+          onBlur={(event) => {
+            // Show the length the export will actually use, not an out-of-range value as typed.
+            const seconds = event.target.valueAsNumber
+            if (!Number.isFinite(seconds)) return
+            const clamped = Math.min(MAX_TRANSITION_SECONDS, Math.max(MIN_TRANSITION_SECONDS, seconds))
+            event.target.value = String(clamped)
+            onChange({ transitionSeconds: clamped })
+          }}
         />
       </label>
       <p className="hint">A transition is never longer than half of the shortest clip.</p>

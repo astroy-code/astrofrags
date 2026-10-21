@@ -8,6 +8,7 @@ export type ExportState =
 
 interface ExportBarProps {
   readonly canExport: boolean
+  readonly clipCount: number
   readonly state: ExportState
   readonly onExport: () => void
   readonly onCancel: () => void
@@ -24,6 +25,7 @@ const DELIVERY_TEXT: Record<DeliveryResult | 'pending', string> = {
 
 export function ExportBar({
   canExport,
+  clipCount,
   state,
   onExport,
   onCancel,
@@ -46,7 +48,7 @@ export function ExportBar({
   return (
     <div className="export-bar">
       <button type="button" className="primary" data-testid="export-button" disabled={!canExport} onClick={onExport}>
-        Export trimmed clip
+        {clipCount > 1 ? 'Export reel' : 'Export trimmed clip'}
       </button>
       {state.phase === 'error' && (
         <p className="error-text" data-testid="export-status" role="alert">

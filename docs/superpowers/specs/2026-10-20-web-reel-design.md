@@ -19,7 +19,7 @@ that to the web page, working on phones, with nothing uploaded.
 
 ## Non-goals
 
-Captions, peak detection, session history, "mute original audio", choosing a transition per
+Captions, peak detection, session history, choosing a transition per
 join, drag-and-drop reordering, several ranges from one file inside one list item (add the file
 again instead), a hard limit on clip count.
 
@@ -63,7 +63,7 @@ again instead), a hard limit on clip count.
 - A clip with no audio contributes silence of its own length; a clip whose chosen track index
   does not exist falls back to the first track.
 - Music loops and ducks over the whole reel, and its fades and length follow the reel's total
-  length. Cards stay silent. The lower-third and watermark are drawn over everything.
+  length. "Music only" (added later) drops the clips' own sound and plays just the music. Cards stay silent. The lower-third and watermark are drawn over everything.
 - File name: `<first file name>-reel-<N>-clips.mp4`.
 - Progress and the time estimate use the reel's total output length.
 

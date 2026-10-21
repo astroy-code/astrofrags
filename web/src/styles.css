@@ -366,3 +366,15 @@ button.primary {
   gap: 8px var(--gutter);
   margin-top: var(--gutter);
 }
+
+.music-picker label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.music-picker input[type='checkbox'] {
+  width: 24px;
+  height: 24px;
+}

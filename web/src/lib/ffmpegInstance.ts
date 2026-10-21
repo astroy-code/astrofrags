@@ -4,6 +4,9 @@ let current: FFmpeg | null = null
 let loading: Promise<FFmpeg> | null = null
 let queue: Promise<unknown> = Promise.resolve()
 
+const ENGINE_LOAD_MESSAGE =
+  'The video engine could not be loaded. Check your connection, reload the page and try again.'
+
 // The core is self-hosted next to the page (see scripts/copy-ffmpeg-core.mjs), resolved
 // against the document base so it works under the GitHub Pages repo subpath.
 function coreUrl(fileName: string): string {
@@ -24,7 +27,7 @@ export function getFFmpeg(): Promise<FFmpeg> {
         current = null
         loading = null
       }
-      throw error
+      throw new Error(ENGINE_LOAD_MESSAGE, { cause: error })
     })
   loading = attempt
   return attempt

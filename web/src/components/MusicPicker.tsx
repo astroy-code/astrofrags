@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { countAudioStreamsOfFile } from '../lib/exportClip.ts'
 
 interface MusicPickerProps {
@@ -19,6 +19,14 @@ export function MusicPicker({
 }: MusicPickerProps): JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
+  // The picker goes away on Start over; a check still running then must not attach music to the next reel.
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   const handlePick = async (file: File): Promise<void> => {
     setError(null)
@@ -28,7 +36,7 @@ export function MusicPicker({
         setError(NOT_AUDIO_MESSAGE)
         return
       }
-      onChange(file)
+      if (mounted.current) onChange(file)
     } catch {
       setError(UNREADABLE_MESSAGE)
     } finally {
