@@ -8,6 +8,7 @@ import {
   createClip,
   emptyReel,
   insertClipsAfter,
+  momentBlockers,
   moveClip,
   removeClip,
   replaceClip,
@@ -254,4 +255,21 @@ test('a new clip has no loudness yet, and a clip from a range shares the recordi
 test('a late loudness result for a removed clip is dropped', () => {
   const reel = removeClip(three(), 2)
   assert.equal(updateClip(reel, 2, { loudness: new Float32Array(1) }), reel)
+})
+
+test('the whole-recording clip does not block moments from its own file, but a moment clip blocks itself', () => {
+  const shared = file('rec')
+  const whole = { ...probed('rec'), file: shared }
+  const moment = { ...probed('rec'), file: shared, range: { start: 5, end: 13 } }
+  const reel = addClips(emptyReel(), [whole, moment])
+  const [wholeClip, momentClip] = reel.clips
+  assert.deepEqual(momentBlockers(reel, wholeClip).map((clip) => clip.id), [momentClip.id])
+  assert.deepEqual(momentBlockers(reel, momentClip).map((clip) => clip.id), [wholeClip.id, momentClip.id])
+})
+
+test('a recording trimmed to part of itself counts as a moment, not the whole recording', () => {
+  const shared = file('rec')
+  const trimmed = { ...probed('rec'), file: shared, range: { start: 0, end: 60 } }
+  const reel = addClips(emptyReel(), [trimmed])
+  assert.deepEqual(momentBlockers(reel, reel.clips[0]).map((clip) => clip.id), [reel.clips[0].id])
 })

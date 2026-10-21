@@ -120,6 +120,18 @@ export function replaceClip(reel: Reel, id: number, items: readonly NewClip[]): 
 export const clipsOfFile = (reel: Reel, file: File, exceptId?: number): readonly ClipItem[] =>
   reel.clips.filter((clip) => clip.file === file && clip.id !== exceptId)
 
+const WHOLE_FILE_SLACK_SECONDS = 0.05
+
+/**
+ * The clips a new moment of `source`'s recording must not replay. The untrimmed recording itself is
+ * left out (it overlaps every moment); a clip trimmed to part of the file counts, including itself.
+ */
+export function momentBlockers(reel: Reel, source: ClipItem): readonly ClipItem[] {
+  const wholeFile =
+    source.range.start <= WHOLE_FILE_SLACK_SECONDS && source.range.end >= source.duration - WHOLE_FILE_SLACK_SECONDS
+  return clipsOfFile(reel, source.file, wholeFile ? source.id : undefined)
+}
+
 export function removeClip(reel: Reel, id: number): Reel {
   const index = reel.clips.findIndex((clip) => clip.id === id)
   if (index < 0) return reel

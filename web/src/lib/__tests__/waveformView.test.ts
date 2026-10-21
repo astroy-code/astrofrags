@@ -5,10 +5,12 @@ import {
   clampView,
   columnLevels,
   fitView,
+  handleAt,
   hitTest,
   isTap,
   normalizeLevels,
   panBy,
+  peakAt,
   timeAtX,
   xAtTime,
   zoomAround,
@@ -176,4 +178,18 @@ test('a touch that barely moves is a tap, one that moves further is not', () => 
   assert.equal(isTap(10, 10, 10, 4), true)
   assert.equal(isTap(10, 10, 10, 3), false)
   assert.equal(isTap(10, 10, 16, 16), true)
+})
+
+test('handleAt finds the nearer handle in reach, or none', () => {
+  assert.equal(handleAt(xAtTime(20, view) + 10, view, range), 'start')
+  assert.equal(handleAt(xAtTime(60, view) - 10, view, range), 'end')
+  assert.equal(handleAt(xAtTime(40, view), view, range), null)
+})
+
+test('peakAt finds a marker even when a handle is also in reach', () => {
+  const near = [{ time: 21, score: 1 }]
+  assert.deepEqual(peakAt(xAtTime(21, view), view, near), near[0])
+  assert.equal(peakAt(xAtTime(70, view), view, near), null)
+  const pair = [{ time: 50, score: 1 }, { time: 55, score: 2 }]
+  assert.deepEqual(peakAt(xAtTime(54, view), view, pair), pair[1])
 })

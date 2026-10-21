@@ -93,6 +93,28 @@ export type Hit =
   | { readonly kind: 'peak'; readonly peak: Peak }
   | { readonly kind: 'none' }
 
+/** The trim handle within reach of `x` (the nearer when both are), or null. */
+export function handleAt(x: number, view: View, range: TrimRange, radiusPx: number = HIT_RADIUS_PX): 'start' | 'end' | null {
+  const toStart = Math.abs(x - xAtTime(range.start, view))
+  const toEnd = Math.abs(x - xAtTime(range.end, view))
+  if (Math.min(toStart, toEnd) > radiusPx) return null
+  return toStart <= toEnd ? 'start' : 'end'
+}
+
+/** The marker nearest to `x` within reach, or null; handles are not considered. */
+export function peakAt(x: number, view: View, peaks: readonly Peak[], radiusPx: number = HIT_RADIUS_PX): Peak | null {
+  let nearest: Peak | null = null
+  let nearestDistance = radiusPx
+  for (const peak of peaks) {
+    const distance = Math.abs(x - xAtTime(peak.time, view))
+    if (distance <= nearestDistance) {
+      nearest = peak
+      nearestDistance = distance
+    }
+  }
+  return nearest
+}
+
 /** What a touch at `x` is on: a trim handle first, else the nearest marker, else nothing. */
 export function hitTest(
   x: number,
@@ -100,20 +122,10 @@ export function hitTest(
   targets: { readonly range: TrimRange; readonly peaks: readonly Peak[] },
   radiusPx: number = HIT_RADIUS_PX
 ): Hit {
-  const toStart = Math.abs(x - xAtTime(targets.range.start, view))
-  const toEnd = Math.abs(x - xAtTime(targets.range.end, view))
-  if (Math.min(toStart, toEnd) <= radiusPx) return { kind: toStart <= toEnd ? 'start' : 'end' }
-
-  let nearest: Peak | null = null
-  let nearestDistance = radiusPx
-  for (const peak of targets.peaks) {
-    const distance = Math.abs(x - xAtTime(peak.time, view))
-    if (distance <= nearestDistance) {
-      nearest = peak
-      nearestDistance = distance
-    }
-  }
-  return nearest ? { kind: 'peak', peak: nearest } : { kind: 'none' }
+  const handle = handleAt(x, view, targets.range, radiusPx)
+  if (handle) return { kind: handle }
+  const peak = peakAt(x, view, targets.peaks, radiusPx)
+  return peak ? { kind: 'peak', peak } : { kind: 'none' }
 }
 
 /** A touch that stayed within a few pixels is a tap, not a drag. */

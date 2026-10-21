@@ -7,10 +7,11 @@ import {
   clampView,
   columnLevels,
   fitView,
-  hitTest,
+  handleAt,
   isTap,
   normalizeLevels,
   panBy,
+  peakAt,
   timeAtX,
   xAtTime,
   zoomAround,
@@ -34,7 +35,15 @@ interface WaveformProps {
 }
 
 type Gesture =
-  | { readonly kind: 'handle'; readonly handle: 'start' | 'end' }
+  | {
+      readonly kind: 'handle'
+      readonly handle: 'start' | 'end'
+      readonly downX: number
+      readonly downY: number
+      /** Where the handle is, relative to the finger, so it moves with the finger instead of jumping to it. */
+      readonly grabOffset: number
+      readonly moved: boolean
+    }
   | { readonly kind: 'tap-or-pan'; readonly downX: number; readonly downY: number; readonly view: View; readonly moved: boolean }
   | { readonly kind: 'pinch'; readonly distance: number; readonly view: View; readonly anchorTime: number }
 
@@ -155,11 +164,17 @@ export function Waveform({
       }
       return
     }
-    const hit = hitTest(point.x, view, { range, peaks })
-    gesture.current =
-      !locked && (hit.kind === 'start' || hit.kind === 'end')
-        ? { kind: 'handle', handle: hit.kind }
-        : { kind: 'tap-or-pan', downX: point.x, downY: point.y, view, moved: false }
+    const handle = locked ? null : handleAt(point.x, view, range)
+    gesture.current = handle
+      ? {
+          kind: 'handle',
+          handle,
+          downX: point.x,
+          downY: point.y,
+          grabOffset: xAtTime(range[handle], view) - point.x,
+          moved: false
+        }
+      : { kind: 'tap-or-pan', downX: point.x, downY: point.y, view, moved: false }
   }
 
   const handleMove = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
@@ -176,7 +191,10 @@ export function Waveform({
       const midX = (a.x + b.x) / 2
       setCustom(clampView({ start: current.anchorTime - midX / pxPerSecond, pxPerSecond }, duration, width))
     } else if (current.kind === 'handle') {
-      const time = Math.min(Math.max(timeAtX(point.x, view), 0), duration)
+      // A press that barely moves is a tap, not the start of a drag.
+      if (!current.moved && isTap(current.downX, current.downY, point.x, point.y)) return
+      gesture.current = { ...current, moved: true }
+      const time = Math.min(Math.max(timeAtX(point.x + current.grabOffset, view), 0), duration)
       const next = current.handle === 'start' ? withStart(range, time, duration) : withEnd(range, time, duration)
       onRangeChange(next)
       onSeek(current.handle === 'start' ? next.start : next.end)
@@ -191,9 +209,10 @@ export function Waveform({
     const point = localPoint(event)
     pointers.current.delete(event.pointerId)
     if (pointers.current.size === 0) gesture.current = null
-    if (current?.kind !== 'tap-or-pan' || current.moved || locked) return
-    const hit = hitTest(point.x, view, { range, peaks })
-    if (hit.kind === 'peak') onAddMoment(hit.peak)
+    if (!current || current.kind === 'pinch' || current.moved || locked) return
+    // A tap: on a marker it adds that moment (even right beside a handle), elsewhere it seeks.
+    const peak = peakAt(point.x, view, peaks)
+    if (peak) onAddMoment(peak)
     else onSeek(Math.min(Math.max(timeAtX(point.x, view), 0), duration))
   }
 

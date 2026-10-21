@@ -12,6 +12,7 @@ import {
   createClip,
   emptyReel,
   insertClipsAfter,
+  momentBlockers,
   moveClip,
   removeClip,
   replaceClip,
@@ -108,7 +109,7 @@ export function useReel(): readonly [Reel, ReelActions] {
       const source = reel.clips.find((clip) => clip.id === sourceId)
       if (!source) return
       const range = peakRange(peak, source.duration)
-      const existing = clipsOfFile(reel, source.file, source.id).find((clip) => overlaps(clip.range, range))
+      const existing = momentBlockers(reel, source).find((clip) => overlaps(clip.range, range))
       commit(
         existing
           ? selectClip(reel, existing.id)

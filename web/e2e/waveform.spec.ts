@@ -131,3 +131,46 @@ test('the handles are locked while an export runs', async ({ page }) => {
   await expect(canvas).toHaveAttribute('data-locked', 'true')
   await page.getByTestId('cancel-button').click()
 })
+
+test('a tap that wobbles beside a handle does not move the trim', async ({ page }) => {
+  const canvas = await openWaveform(page)
+  const handle = await xAt(canvas, 0)
+
+  await page.mouse.move(handle.x + 12, handle.y)
+  await page.mouse.down()
+  await page.mouse.move(handle.x + 14, handle.y + 2)
+  await page.mouse.up()
+
+  expect(Number(await page.getByTestId('start-slider').inputValue())).toBe(0)
+})
+
+test('a handle follows the finger by how far it moves, not to where the finger lands', async ({ page }) => {
+  const canvas = await openWaveform(page)
+  const box = await canvas.boundingBox()
+  const handle = await xAt(canvas, 0)
+
+  // Grab 12 px from the handle and drag 100 px: the handle moves 100 px, not 112.
+  await page.mouse.move(handle.x + 12, handle.y)
+  await page.mouse.down()
+  await page.mouse.move(handle.x + 112, handle.y, { steps: 8 })
+  await page.mouse.up()
+
+  const expected = (100 / (box?.width ?? 1)) * DURATION
+  expect(Number(await page.getByTestId('start-slider').inputValue())).toBeCloseTo(expected, 0)
+})
+
+test('tapping the marker of a moment clip again, or adding a clip at its own moment, selects instead of duplicating', async ({ page }) => {
+  const canvas = await openWaveform(page)
+  const marker = await xAt(canvas, 10.2)
+  await page.mouse.click(marker.x, marker.y)
+  await expect(page.getByTestId('clip-item')).toHaveCount(2)
+  await expect(canvas).toBeVisible()
+
+  await page.mouse.click(marker.x, marker.y)
+  await expect(page.getByTestId('clip-item')).toHaveCount(2)
+
+  const inside = await xAt(canvas, 11)
+  await page.mouse.click(inside.x, inside.y)
+  await page.getByTestId('add-clip-here').click()
+  await expect(page.getByTestId('clip-item')).toHaveCount(2)
+})
