@@ -1,4 +1,5 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { formatTime } from '../lib/formatTime.ts'
 import type { VideoMetadata } from '../lib/clipMetadata.ts'
 import { withEnd, withStart } from '../lib/trimRange.ts'
@@ -14,6 +15,13 @@ interface TrimPlayerProps {
   readonly locked?: boolean
   readonly onMetadata: (metadata: VideoMetadata) => void
   readonly onRangeChange: (range: TrimRange) => void
+  /** Extra controls under the video, given its current time and a way to move it. */
+  readonly children?: (video: {
+    readonly currentTime: number
+    /** The video's time right now, which can be newer than `currentTime` just after a seek. */
+    readonly readTime: () => number
+    readonly seek: (seconds: number) => void
+  }) => ReactNode
 }
 
 const SLIDER_STEP_SECONDS = 0.01
@@ -24,9 +32,11 @@ export function TrimPlayer({
   range,
   locked = false,
   onMetadata,
-  onRangeChange
+  onRangeChange,
+  children
 }: TrimPlayerProps): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [currentTime, setCurrentTime] = useState(0)
   const ready = Number.isFinite(duration) && duration > 0
   const editable = ready && !locked
 
@@ -57,7 +67,10 @@ export function TrimPlayer({
         onLoadedMetadata={() => reportMetadata('metadata')}
         onDurationChange={() => reportMetadata('duration')}
         onError={() => reportMetadata('error')}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onSeeked={(event) => setCurrentTime(event.currentTarget.currentTime)}
       />
+      {children?.({ currentTime, readTime: () => videoRef.current?.currentTime ?? currentTime, seek })}
       <div className="trim-row">
         <label>
           Start <output>{formatTime(range.start)}</output>

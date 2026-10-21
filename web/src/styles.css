@@ -431,3 +431,32 @@ button.primary {
   font-size: 0.875rem;
   opacity: 0.75;
 }
+
+.waveform {
+  margin: 8px 0 12px;
+}
+
+.waveform-box {
+  width: 100%;
+  border-radius: 6px;
+  background: rgba(128, 128, 128, 0.12);
+  overflow: hidden;
+}
+
+.waveform canvas {
+  display: block;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.waveform-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.waveform-controls button {
+  min-height: 44px;
+  min-width: 44px;
+}

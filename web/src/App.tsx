@@ -13,6 +13,7 @@ import { FilePicker } from './components/FilePicker.tsx'
 import { Notice } from './components/Notice.tsx'
 import { TransitionOptions } from './components/TransitionOptions.tsx'
 import { TrimPlayer } from './components/TrimPlayer.tsx'
+import { Waveform } from './components/Waveform.tsx'
 import { chooseAudioTrack, isSilent } from './lib/audioLevels.ts'
 import { deliverClip } from './lib/deliverClip.ts'
 import { detectHighlights, HighlightsCancelledError } from './lib/detectHighlights.ts'
@@ -377,7 +378,24 @@ export function App(): JSX.Element {
           locked={running}
           onMetadata={(metadata) => actions.reportMetadata(selected.id, metadata)}
           onRangeChange={(range) => actions.patch(selected.id, { range })}
-        />
+        >
+          {(video) =>
+            selected.loudness && selected.highlights ? (
+              <Waveform
+                loudness={selected.loudness}
+                duration={selected.duration}
+                range={selected.range}
+                peaks={selected.highlights}
+                currentTime={video.currentTime}
+                readTime={video.readTime}
+                locked={running}
+                onSeek={video.seek}
+                onRangeChange={(range) => actions.patch(selected.id, { range })}
+                onAddMoment={(peak) => actions.addMoment(selected.id, peak)}
+              />
+            ) : null
+          }
+        </TrimPlayer>
       )}
 
       {selected && (
