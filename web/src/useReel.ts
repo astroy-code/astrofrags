@@ -2,19 +2,28 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { applyMetadata } from './lib/clipMetadata.ts'
 import type { VideoMetadata } from './lib/clipMetadata.ts'
 import { probeAudioTracks } from './lib/exportClip.ts'
+import { chooseHighlights, peakRange } from './lib/highlights.ts'
+import type { Peak } from './lib/highlights.ts'
 import {
   addClips,
   clearReel,
+  clipFromRange,
+  clipsOfFile,
   createClip,
   emptyReel,
+  insertClipsAfter,
   moveClip,
   removeClip,
+  replaceClip,
   selectClip,
   setMusic,
   setMuteOriginal,
   updateClip
 } from './lib/reel.ts'
 import type { ClipItem, Reel } from './lib/reel.ts'
+import type { TrimRange } from './lib/trimRange.ts'
+
+const overlaps = (a: TrimRange, b: TrimRange): boolean => a.start < b.end && b.start < a.end
 
 export interface ReelActions {
   readonly addFiles: (files: readonly File[]) => void
@@ -25,6 +34,14 @@ export interface ReelActions {
   readonly reportMetadata: (id: number, metadata: VideoMetadata) => void
   readonly setMusicFile: (file: File | null) => void
   readonly setMuteOriginal: (muteOriginal: boolean) => void
+  readonly setHighlights: (id: number, peaks: readonly Peak[] | null) => void
+  /** Adds a clip around a moment of a recording (or selects the one already there). */
+  readonly addMoment: (sourceId: number, peak: Peak) => void
+  /** Swaps a recording's clip for its best moments; `fit` may shorten the whole reel afterwards. */
+  readonly buildFromHighlights: (
+    sourceId: number,
+    fit: (ranges: readonly TrimRange[]) => readonly TrimRange[]
+  ) => void
   readonly startOver: () => void
 }
 
@@ -85,6 +102,44 @@ export function useReel(): readonly [Reel, ReelActions] {
     [patch]
   )
 
+  const addMoment = useCallback(
+    (sourceId: number, peak: Peak) => {
+      const reel = reelRef.current
+      const source = reel.clips.find((clip) => clip.id === sourceId)
+      if (!source) return
+      const range = peakRange(peak, source.duration)
+      const existing = clipsOfFile(reel, source.file, source.id).find((clip) => overlaps(clip.range, range))
+      commit(
+        existing
+          ? selectClip(reel, existing.id)
+          : insertClipsAfter(reel, source.id, [clipFromRange(source, URL.createObjectURL(source.file), range)])
+      )
+    },
+    [commit]
+  )
+
+  const buildFromHighlights = useCallback(
+    (sourceId: number, fit: (ranges: readonly TrimRange[]) => readonly TrimRange[]) => {
+      const reel = reelRef.current
+      const source = reel.clips.find((clip) => clip.id === sourceId)
+      if (!source?.highlights) return
+      const chosen = chooseHighlights({
+        peaks: source.highlights,
+        duration: source.duration,
+        taken: clipsOfFile(reel, source.file, source.id).map((clip) => clip.range)
+      })
+      const replaced = replaceClip(
+        reel,
+        source.id,
+        chosen.map(({ range }) => clipFromRange(source, URL.createObjectURL(source.file), range))
+      )
+      if (replaced === reel) return
+      const fitted = fit(replaced.clips.map((clip) => clip.range))
+      commit({ ...replaced, clips: replaced.clips.map((clip, index) => ({ ...clip, range: fitted[index] })) })
+    },
+    [commit]
+  )
+
   const actions: ReelActions = {
     addFiles,
     remove: useCallback((id) => commit(removeClip(reelRef.current, id)), [commit]),
@@ -94,6 +149,9 @@ export function useReel(): readonly [Reel, ReelActions] {
     reportMetadata,
     setMusicFile: useCallback((file) => commit(setMusic(reelRef.current, file)), [commit]),
     setMuteOriginal: useCallback((mute) => commit(setMuteOriginal(reelRef.current, mute)), [commit]),
+    setHighlights: useCallback((id, peaks) => commit(updateClip(reelRef.current, id, { highlights: peaks })), [commit]),
+    addMoment,
+    buildFromHighlights,
     startOver: useCallback(() => commit(clearReel(reelRef.current)), [commit])
   }
   return [reel, actions]

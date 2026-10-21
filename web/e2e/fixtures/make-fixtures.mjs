@@ -57,4 +57,18 @@ export function makeFixtures(outDir) {
   ])
   // Music that adds no sound at all, so only the clips' own audio can be heard in an export.
   ffmpeg(['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', '3', join(outDir, FIXTURE_NAMES.silenceMusic)])
+  // Loud bursts over a quiet bed, for the highlight finder: 40 s with bursts at 10 s and 30 s.
+  ffmpeg([
+    '-f', 'lavfi', '-i', 'testsrc=duration=40:size=160x90:rate=5',
+    '-f', 'lavfi', '-i', 'sine=frequency=300:duration=40',
+    '-af', "volume='0.02+0.9*(between(t,10,10.4)+between(t,30,30.4))':eval=frame",
+    ...VP9, '-c:a', 'libopus', '-shortest', join(outDir, FIXTURE_NAMES.bursts)
+  ])
+  // Ten minutes with one burst at 100 s: long enough to cancel the finder while it works.
+  ffmpeg([
+    '-f', 'lavfi', '-i', 'testsrc=duration=600:size=160x90:rate=1',
+    '-f', 'lavfi', '-i', 'sine=frequency=300:duration=600',
+    '-af', "volume='0.02+0.9*between(t,100,100.4)':eval=frame",
+    ...VP9, '-c:a', 'libopus', '-shortest', join(outDir, FIXTURE_NAMES.lengthy)
+  ])
 }

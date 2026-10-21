@@ -8,5 +8,7 @@
   "notAudio": "not-audio.mp3",
   "portrait": "portrait.webm",
   "long": "long.webm",
-  "silenceMusic": "silence.wav"
+  "silenceMusic": "silence.wav",
+  "bursts": "bursts.webm",
+  "lengthy": "lengthy.webm"
 }

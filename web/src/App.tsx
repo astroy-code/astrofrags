@@ -5,6 +5,7 @@ import { CardPreview } from './components/CardPreview.tsx'
 import { ClipList } from './components/ClipList.tsx'
 import { ClipMetadataProbe } from './components/ClipMetadataProbe.tsx'
 import { ExportBar } from './components/ExportBar.tsx'
+import { HighlightsPanel } from './components/HighlightsPanel.tsx'
 import { ExportFormatPicker } from './components/ExportFormatPicker.tsx'
 import { MusicPicker } from './components/MusicPicker.tsx'
 import type { ExportState } from './components/ExportBar.tsx'
@@ -14,6 +15,7 @@ import { TransitionOptions } from './components/TransitionOptions.tsx'
 import { TrimPlayer } from './components/TrimPlayer.tsx'
 import { chooseAudioTrack, isSilent } from './lib/audioLevels.ts'
 import { deliverClip } from './lib/deliverClip.ts'
+import { detectHighlights, HighlightsCancelledError } from './lib/detectHighlights.ts'
 import { shouldAutoDeliver } from './lib/deliveryPolicy.ts'
 import { estimateExportSeconds } from './lib/estimate.ts'
 import { ExportCancelledError, exportTrimmedClip } from './lib/exportClip.ts'
@@ -34,6 +36,7 @@ import {
   SOFT_LIMIT_BYTES
 } from './lib/sizeLimit.ts'
 import { validateTrimRange } from './lib/trimRange.ts'
+import type { TrimRange } from './lib/trimRange.ts'
 import { useBrandingSettings } from './useBrandingSettings.ts'
 import { useReel } from './useReel.ts'
 
@@ -83,6 +86,9 @@ export function App(): JSX.Element {
   const [exportState, setExportState] = useState<ExportState>(IDLE)
   const abortRef = useRef<AbortController | null>(null)
   const exportedRef = useRef<ExportedClip | null>(null)
+  const [highlightRun, setHighlightRun] = useState<{ readonly clipId: number; readonly progress: number } | null>(null)
+  const [highlightError, setHighlightError] = useState<{ readonly clipId: number; readonly message: string } | null>(null)
+  const highlightAbortRef = useRef<AbortController | null>(null)
 
   const running = exportState.phase === 'running'
   const selected = selectedClip(reel)
@@ -90,6 +96,8 @@ export function App(): JSX.Element {
 
   const handleExport = useCallback(async () => {
     if (reel.clips.length === 0) return
+    // The engine can only do one thing at a time; a search in progress gives way to the export.
+    highlightAbortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     setExportState({ phase: 'running', progress: 0 })
@@ -130,10 +138,54 @@ export function App(): JSX.Element {
     // A running export belongs to the old reel; it must not finish into a new one.
     abortRef.current?.abort()
     abortRef.current = null
+    highlightAbortRef.current?.abort()
     exportedRef.current = null
     setExportState(IDLE)
     actions.startOver()
   }, [actions])
+
+  const handleRemove = useCallback(
+    (id: number) => {
+      if (highlightRun?.clipId === id) highlightAbortRef.current?.abort()
+      actions.remove(id)
+    },
+    [actions, highlightRun]
+  )
+
+  const handleFind = useCallback(
+    async (clip: ClipItem) => {
+      const trackIndex = trackOf(clip)
+      if (trackIndex === null || highlightAbortRef.current) return
+      const controller = new AbortController()
+      highlightAbortRef.current = controller
+      setHighlightError(null)
+      setHighlightRun({ clipId: clip.id, progress: 0 })
+      try {
+        const peaks = await detectHighlights({
+          file: clip.file,
+          trackIndex,
+          durationSeconds: clip.duration,
+          onProgress: (progress) =>
+            setHighlightRun((current) => (current?.clipId === clip.id ? { clipId: clip.id, progress } : current)),
+          signal: controller.signal
+        })
+        if (!controller.signal.aborted) actions.setHighlights(clip.id, peaks)
+      } catch (error) {
+        if (!(error instanceof HighlightsCancelledError) && !controller.signal.aborted) {
+          setHighlightError({
+            clipId: clip.id,
+            message: error instanceof Error ? error.message : 'Finding highlights failed.'
+          })
+        }
+      } finally {
+        if (highlightAbortRef.current === controller) {
+          highlightAbortRef.current = null
+          setHighlightRun(null)
+        }
+      }
+    },
+    [actions]
+  )
 
   const handlePick = useCallback(
     (files: readonly File[]) => {
@@ -179,19 +231,31 @@ export function App(): JSX.Element {
   const isShorts = branding.exportFormat === 'vertical' || branding.exportFormat === 'vertical-crop'
   const overShortsCap = isShorts && exportedSeconds !== null && isOverCap(exportedSeconds, SHORTS_CAP_SECONDS)
 
+  // Shortens a reel's ranges to the Shorts cap the way the Fit button does (cards and crossfade included).
+  const fitRanges = useCallback(
+    (ranges: readonly TrimRange[]): readonly TrimRange[] =>
+      fitReelToCap({
+        ranges,
+        capSeconds: SHORTS_CAP_SECONDS,
+        cardSeconds:
+          (branding.introEnabled ? branding.cardDurationSeconds : 0) +
+          (branding.outroEnabled ? branding.cardDurationSeconds : 0),
+        transitionSeconds: branding.transitionsEnabled ? branding.transitionSeconds : null,
+        minClipSeconds: MIN_FIT_CLIP_SECONDS
+      }),
+    [branding]
+  )
+
   const handleFitToCap = useCallback(() => {
-    const cards =
-      (branding.introEnabled ? branding.cardDurationSeconds : 0) +
-      (branding.outroEnabled ? branding.cardDurationSeconds : 0)
-    const fitted = fitReelToCap({
-      ranges: reel.clips.map((clip) => clip.range),
-      capSeconds: SHORTS_CAP_SECONDS,
-      cardSeconds: cards,
-      transitionSeconds: branding.transitionsEnabled ? branding.transitionSeconds : null,
-      minClipSeconds: MIN_FIT_CLIP_SECONDS
-    })
+    const fitted = fitRanges(reel.clips.map((clip) => clip.range))
     reel.clips.forEach((clip, index) => actions.patch(clip.id, { range: fitted[index] }))
-  }, [branding, reel.clips, actions])
+  }, [fitRanges, reel.clips, actions])
+
+  // A reel built from highlights is fitted at once for the vertical formats, like desktop's auto-build.
+  const handleBuild = useCallback(
+    (sourceId: number) => actions.buildFromHighlights(sourceId, isShorts ? fitRanges : (ranges) => ranges),
+    [actions, fitRanges, isShorts]
+  )
 
   // A finished (or failed) export describes the reel as it was; any real edit makes it stale.
   const exportKey = JSON.stringify([
@@ -300,7 +364,7 @@ export function App(): JSX.Element {
           locked={running}
           onSelect={actions.select}
           onMove={actions.move}
-          onRemove={actions.remove}
+          onRemove={handleRemove}
         />
       )}
 
@@ -313,6 +377,20 @@ export function App(): JSX.Element {
           locked={running}
           onMetadata={(metadata) => actions.reportMetadata(selected.id, metadata)}
           onRangeChange={(range) => actions.patch(selected.id, { range })}
+        />
+      )}
+
+      {selected && (
+        <HighlightsPanel
+          clip={selected}
+          searching={highlightRun?.clipId === selected.id}
+          progress={highlightRun?.progress ?? 0}
+          error={highlightError?.clipId === selected.id ? highlightError.message : null}
+          busy={running || highlightRun !== null}
+          onFind={() => void handleFind(selected)}
+          onCancel={() => highlightAbortRef.current?.abort()}
+          onAddMoment={(peak) => actions.addMoment(selected.id, peak)}
+          onBuild={() => handleBuild(selected.id)}
         />
       )}
 

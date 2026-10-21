@@ -8,7 +8,7 @@ import ffmpegPath from 'ffmpeg-static'
 
 // Playwright loads these files as CommonJS, so __dirname is available and import.meta is not.
 export const FIXTURE_NAMES: Record<
-  'clip' | 'silent' | 'awkward' | 'audioOnly' | 'twoTrack' | 'music' | 'notAudio' | 'portrait' | 'long' | 'silenceMusic',
+  'clip' | 'silent' | 'awkward' | 'audioOnly' | 'twoTrack' | 'music' | 'notAudio' | 'portrait' | 'long' | 'silenceMusic' | 'bursts' | 'lengthy',
   string
 > = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'names.json'), 'utf8'))
 const FIXTURE_DIR = join(__dirname, '.fixtures')
