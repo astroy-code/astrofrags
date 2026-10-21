@@ -2,7 +2,7 @@ import { runAbortable } from './abortableTask.ts'
 import { buildHighlightDecodeArgs } from './ffmpegArgs.ts'
 import { getFFmpeg, resetFFmpeg, runExclusive } from './ffmpegInstance.ts'
 import { withMountedFile } from './exportClip.ts'
-import { pcmPeaks } from './highlights.ts'
+import { peaksFromChunks } from './highlights.ts'
 import type { Peak } from './highlights.ts'
 import { progressRatio } from './progress.ts'
 
@@ -38,16 +38,39 @@ export function detectHighlights(req: DetectRequest): Promise<readonly Peak[]> {
 async function decode({ file, trackIndex, durationSeconds, onProgress, signal }: DetectRequest): Promise<readonly Peak[]> {
   const ffmpeg = await getFFmpeg()
   if (signal?.aborted) throw new HighlightsCancelledError()
-  const onEngineProgress = ({ time }: { time: number }): void => onProgress(progressRatio(time, durationSeconds))
+  let chunkIndex = 0
+  let chunkCount = 1
+  let chunkLength = durationSeconds
+  const onEngineProgress = ({ time }: { time: number }): void =>
+    onProgress((chunkIndex + progressRatio(time, chunkLength)) / chunkCount)
   ffmpeg.on('progress', onEngineProgress)
   try {
-    const exitCode = await withMountedFile(ffmpeg, file, (inputPath) =>
-      ffmpeg.exec(buildHighlightDecodeArgs({ inputPath, trackIndex, outputPath: PCM_FILE }))
+    // The file is mounted once; each chunk of it is decoded, measured and dropped in turn, so only
+    // about ten minutes of audio is ever held, however long the recording is.
+    return await withMountedFile(ffmpeg, file, (inputPath) =>
+      peaksFromChunks({
+        durationSeconds,
+        decode: async (chunk, index, count) => {
+          chunkIndex = index
+          chunkCount = count
+          chunkLength = chunk.length
+          const exitCode = await ffmpeg.exec(
+            buildHighlightDecodeArgs({
+              inputPath,
+              trackIndex,
+              outputPath: PCM_FILE,
+              startSeconds: chunk.start,
+              durationSeconds: chunk.length
+            })
+          )
+          if (exitCode !== 0) throw new Error('The sound of this video could not be read, so no highlights were found.')
+          const data = await ffmpeg.readFile(PCM_FILE)
+          if (typeof data === 'string') throw new Error('The sound of this video could not be read.')
+          await ffmpeg.deleteFile(PCM_FILE).catch(() => undefined)
+          return data
+        }
+      })
     )
-    if (exitCode !== 0) throw new Error("The sound of this video could not be read, so no highlights were found.")
-    const data = await ffmpeg.readFile(PCM_FILE)
-    if (typeof data === 'string') throw new Error('The sound of this video could not be read.')
-    return pcmPeaks(data)
   } finally {
     // After a cancel the instance was terminated; these calls are harmless no-ops on it.
     ffmpeg.off('progress', onEngineProgress)

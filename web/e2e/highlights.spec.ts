@@ -92,3 +92,14 @@ test('starting over during the search leaves an empty page that still works', as
   await expect(page.getByTestId('find-highlights')).toBeEnabled({ timeout: 60_000 })
   await expect(page.getByTestId('highlight-moment')).toHaveCount(0)
 })
+
+test('a recording longer than one chunk is searched to its end', async ({ page }) => {
+  await pickAndFind(page, FIXTURE_NAMES.lengthy)
+
+  await page.getByTestId('find-highlights').click()
+
+  const moments = page.getByTestId('highlight-moment')
+  await expect(moments).toHaveCount(2, { timeout: 90_000 })
+  await expect(moments.nth(0)).toContainText('1:40')
+  await expect(moments.nth(1)).toContainText('10:50')
+})

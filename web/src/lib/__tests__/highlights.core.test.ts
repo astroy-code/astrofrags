@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildHighlightDecodeArgs } from '../ffmpegArgs.ts'
-import { pcmPeaks } from '../highlights.ts'
+import { pcmPeaks, peaksFromChunks } from '../highlights.ts'
 import { makeBurstClip, makeFixture, runCore } from './support/ffmpegCore.ts'
 
 async function peaksOf(clip: Uint8Array) {
@@ -44,4 +44,30 @@ test('pcm that starts at an odd offset in its buffer is read the same', () => {
   const shifted = new Uint8Array(aligned.length + 1)
   shifted.set(aligned, 1)
   assert.deepEqual(pcmPeaks(shifted.subarray(1)), pcmPeaks(aligned))
+})
+
+test('decoding a recording in chunks finds the same moments, even one that straddles a chunk edge', async () => {
+  const clip = await makeBurstClip({ seconds: 30, bursts: [8, 9.8, 24] })
+  const whole = await peaksOf(clip)
+  const chunked = await peaksFromChunks({
+    durationSeconds: 30,
+    chunkSeconds: 10,
+    decode: async ({ start, length }) => {
+      const run = await runCore(
+        buildHighlightDecodeArgs({
+          inputPath: 'in.mp4',
+          trackIndex: 0,
+          outputPath: 'out.pcm',
+          startSeconds: start,
+          durationSeconds: length
+        }),
+        { 'in.mp4': clip }
+      )
+      assert.equal(run.exitCode, 0, run.log.slice(-300))
+      return run.read('out.pcm')
+    }
+  })
+  const times = (list: readonly { time: number }[]): number[] => list.map((peak) => peak.time).sort((a, b) => a - b)
+  assert.equal(chunked.length, whole.length)
+  times(chunked).forEach((time, index) => assert.ok(Math.abs(time - times(whole)[index]) < 0.35, `${time}`))
 })

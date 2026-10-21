@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chooseHighlights, findPeaks, peakRange, rmsPerWindow } from '../highlights.ts'
+import { chooseHighlights, findPeaks, peakRange, peaksFromChunks, planChunks, rmsPerWindow, windowsOfChunk } from '../highlights.ts'
 import type { Peak } from '../highlights.ts'
 
 const close = (actual: number, expected: number, tolerance = 1e-6): void =>
@@ -109,4 +109,98 @@ test('chooseHighlights never returns two overlapping ranges', () => {
   chosen.forEach((a, i) =>
     chosen.slice(i + 1).forEach((b) => assert.ok(a.range.end <= b.range.start || b.range.end <= a.range.start))
   )
+})
+
+test('a recording is planned as consecutive chunks with a shorter last one', () => {
+  assert.deepEqual(planChunks(25, 10), [
+    { start: 0, length: 10 },
+    { start: 10, length: 10 },
+    { start: 20, length: 5 }
+  ])
+  assert.deepEqual(planChunks(10, 10), [{ start: 0, length: 10 }])
+  assert.deepEqual(planChunks(0, 10), [])
+  assert.deepEqual(planChunks(Number.NaN, 10), [])
+})
+
+test('a long recording is planned in 10-minute chunks by default', () => {
+  const chunks = planChunks(4 * 3600)
+  assert.equal(chunks.length, 24)
+  assert.ok(chunks.every((chunk) => chunk.length === 600))
+})
+
+test('a chunk keeps exactly its expected number of windows, whatever the decoder returned', () => {
+  const loud = (samples: number): Int16Array => new Int16Array(samples).fill(1000)
+  const toBytes = (data: Int16Array): Uint8Array => new Uint8Array(data.buffer)
+  const exact = windowsOfChunk(toBytes(loud(8000 * 2)), 20)
+  assert.equal(exact.length, 20)
+  // One sample too many would start an extra window and push everything after it 0.1 s late.
+  assert.equal(windowsOfChunk(toBytes(loud(8000 * 2 + 1)), 20).length, 20)
+  // A short decode is padded with silence so later chunks keep their place in time.
+  const padded = windowsOfChunk(toBytes(loud(8000 * 1)), 20)
+  assert.equal(padded.length, 20)
+  assert.equal(padded[19], 0)
+  // Without an expected count (the last chunk) every window is kept.
+  assert.equal(windowsOfChunk(toBytes(loud(8000 * 2 + 400)), null).length, 21)
+})
+
+/** PCM for a quiet chunk with a loud burst at `at` seconds into it. */
+function chunkPcm(seconds: number, at: number | null, extraSamples = 0): Uint8Array {
+  const samples = new Int16Array(8000 * seconds + extraSamples).fill(100)
+  if (at !== null) samples.fill(20000, Math.round(at * 8000), Math.round((at + 0.4) * 8000))
+  return new Uint8Array(samples.buffer)
+}
+
+test('peaks found chunk by chunk land at their time in the whole recording', async () => {
+  const bursts: Record<number, number | null> = { 0: 3, 1: null, 2: 3 }
+  const peaks = await peaksFromChunks({
+    durationSeconds: 25,
+    chunkSeconds: 10,
+    decode: async (chunk, index) => chunkPcm(chunk.length, bursts[index] ?? null)
+  })
+  const times = peaks.map((peak) => peak.time).sort((a, b) => a - b)
+  assert.equal(times.length, 2)
+  assert.ok(Math.abs(times[0] - 3) < 0.3, `first at ${times[0]}`)
+  assert.ok(Math.abs(times[1] - 23) < 0.3, `second at ${times[1]}`)
+})
+
+test('a decoder that returns an extra sample per chunk does not drift later peaks', async () => {
+  const peaks = await peaksFromChunks({
+    durationSeconds: 40,
+    chunkSeconds: 10,
+    decode: async (chunk, index) => chunkPcm(chunk.length, index === 3 ? 5 : null, 1)
+  })
+  assert.equal(peaks.length, 1)
+  assert.ok(Math.abs(peaks[0].time - 35) < 0.2, `at ${peaks[0].time}`)
+})
+
+test('a chunk that fails to decode fails the whole search', async () => {
+  await assert.rejects(
+    peaksFromChunks({
+      durationSeconds: 20,
+      chunkSeconds: 10,
+      decode: async (_chunk, index) => {
+        if (index === 1) throw new Error('decode failed')
+        return chunkPcm(10, null)
+      }
+    }),
+    /decode failed/
+  )
+})
+
+test('the chunks are asked for in order, one at a time', async () => {
+  const asked: number[] = []
+  let running = 0
+  await peaksFromChunks({
+    durationSeconds: 30,
+    chunkSeconds: 10,
+    decode: async (chunk, index) => {
+      running += 1
+      assert.equal(running, 1)
+      asked.push(index)
+      await new Promise((resolve) => setTimeout(resolve, 2))
+      running -= 1
+      return chunkPcm(chunk.length, null)
+    }
+  })
+  assert.deepEqual(asked, [0, 1, 2])
 })

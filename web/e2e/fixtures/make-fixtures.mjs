@@ -64,11 +64,12 @@ export function makeFixtures(outDir) {
     '-af', "volume='0.02+0.9*(between(t,10,10.4)+between(t,30,30.4))':eval=frame",
     ...VP9, '-c:a', 'libopus', '-shortest', join(outDir, FIXTURE_NAMES.bursts)
   ])
-  // Ten minutes with one burst at 100 s: long enough to cancel the finder while it works.
+  // Nearly twelve minutes (more than one 10-minute chunk) with bursts at 100 s and 650 s: long enough
+  // to cancel the finder while it works, and to find a moment in the second chunk.
   ffmpeg([
-    '-f', 'lavfi', '-i', 'testsrc=duration=600:size=160x90:rate=1',
-    '-f', 'lavfi', '-i', 'sine=frequency=300:duration=600',
-    '-af', "volume='0.02+0.9*between(t,100,100.4)':eval=frame",
+    '-f', 'lavfi', '-i', 'testsrc=duration=700:size=160x90:rate=1',
+    '-f', 'lavfi', '-i', 'sine=frequency=300:duration=700',
+    '-af', "volume='0.02+0.9*(between(t,100,100.4)+between(t,650,650.4))':eval=frame",
     ...VP9, '-c:a', 'libopus', '-shortest', join(outDir, FIXTURE_NAMES.lengthy)
   ])
 }

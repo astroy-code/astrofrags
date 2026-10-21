@@ -13,6 +13,8 @@ const BYTES_PER_SAMPLE = 2
 export const HIGHLIGHT_PAD_BEFORE = 5
 export const HIGHLIGHT_PAD_AFTER = 3
 export const MAX_BUILD_CLIPS = 8
+/** Ten minutes of 8 kHz audio is about 10 MB, so memory stays small however long the recording is. */
+export const HIGHLIGHT_CHUNK_SECONDS = 600
 
 export interface Peak {
   /** Seconds from the start of the recording. */
@@ -64,6 +66,61 @@ export function pcmPeaks(pcm: Uint8Array): Peak[] {
   const bytes = pcm.byteOffset % BYTES_PER_SAMPLE === 0 ? pcm : pcm.slice()
   const samples = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.length / BYTES_PER_SAMPLE))
   return findPeaks(rmsPerWindow(samples, HIGHLIGHT_SAMPLE_RATE))
+}
+
+export interface Chunk {
+  /** Seconds from the start of the recording. */
+  readonly start: number
+  readonly length: number
+}
+
+/** Splits a recording into consecutive chunks (the last may be shorter). */
+export function planChunks(durationSeconds: number, chunkSeconds: number = HIGHLIGHT_CHUNK_SECONDS): Chunk[] {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return []
+  const chunks: Chunk[] = []
+  for (let start = 0; start < durationSeconds; start += chunkSeconds) {
+    chunks.push({ start, length: Math.min(chunkSeconds, durationSeconds - start) })
+  }
+  return chunks
+}
+
+/**
+ * The loudness windows of one decoded chunk. A chunk that is not the last must be exactly
+ * `expectedWindows` long (extra samples are dropped, a short decode is padded with silence), so
+ * every later window keeps its place in time.
+ */
+export function windowsOfChunk(pcm: Uint8Array, expectedWindows: number | null): number[] {
+  const bytes = pcm.byteOffset % BYTES_PER_SAMPLE === 0 ? pcm : pcm.slice()
+  const samples = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.length / BYTES_PER_SAMPLE))
+  const windows = rmsPerWindow(samples, HIGHLIGHT_SAMPLE_RATE)
+  if (expectedWindows === null) return windows
+  const fitted = windows.slice(0, expectedWindows)
+  while (fitted.length < expectedWindows) fitted.push(0)
+  return fitted
+}
+
+export interface ChunkedRequest {
+  readonly durationSeconds: number
+  readonly chunkSeconds?: number
+  /** Decodes one chunk to 8 kHz mono PCM; called in order, one at a time. */
+  readonly decode: (chunk: Chunk, index: number, count: number) => Promise<Uint8Array>
+}
+
+/** Finds peaks of a whole recording while holding only one chunk of audio at a time. */
+export async function peaksFromChunks({
+  durationSeconds,
+  chunkSeconds = HIGHLIGHT_CHUNK_SECONDS,
+  decode
+}: ChunkedRequest): Promise<Peak[]> {
+  const chunks = planChunks(durationSeconds, chunkSeconds)
+  const windows: number[] = []
+  for (const [index, chunk] of chunks.entries()) {
+    const pcm = await decode(chunk, index, chunks.length)
+    const isLast = index === chunks.length - 1
+    const expected = isLast ? null : Math.round(chunk.length / WINDOW_SECONDS)
+    for (const value of windowsOfChunk(pcm, expected)) windows.push(value)
+  }
+  return findPeaks(windows)
 }
 
 /** The clip that frames a moment: 5 s before to 3 s after, kept inside the recording. */
