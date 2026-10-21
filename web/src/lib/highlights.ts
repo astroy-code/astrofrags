@@ -60,9 +60,9 @@ export function findPeaks(windows: readonly number[]): Peak[] {
 
 /** Peaks of raw little-endian 16-bit mono PCM at HIGHLIGHT_SAMPLE_RATE (any trailing odd byte is ignored). */
 export function pcmPeaks(pcm: Uint8Array): Peak[] {
-  // Copy so the Int16Array view starts on an aligned buffer, whatever offset the bytes came from.
-  const bytes = pcm.slice()
-  const samples = new Int16Array(bytes.buffer, 0, Math.floor(bytes.length / BYTES_PER_SAMPLE))
+  // A 16-bit view needs an even byte offset; copy only when the bytes do not start on one.
+  const bytes = pcm.byteOffset % BYTES_PER_SAMPLE === 0 ? pcm : pcm.slice()
+  const samples = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.length / BYTES_PER_SAMPLE))
   return findPeaks(rmsPerWindow(samples, HIGHLIGHT_SAMPLE_RATE))
 }
 

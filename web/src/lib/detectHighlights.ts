@@ -1,3 +1,4 @@
+import { runAbortable } from './abortableTask.ts'
 import { buildHighlightDecodeArgs } from './ffmpegArgs.ts'
 import { getFFmpeg, resetFFmpeg, runExclusive } from './ffmpegInstance.ts'
 import { withMountedFile } from './exportClip.ts'
@@ -24,19 +25,14 @@ export interface DetectRequest {
 }
 
 /** Decodes one audio track of a picked file and returns its loudest moments, strongest first. */
-export async function detectHighlights(req: DetectRequest): Promise<readonly Peak[]> {
-  if (req.signal?.aborted) throw new HighlightsCancelledError()
-  // Registered before any waiting so Cancel works while queued, loading or decoding.
-  const onAbort = (): void => resetFFmpeg()
-  req.signal?.addEventListener('abort', onAbort, { once: true })
-  try {
-    return await runExclusive(() => decode(req))
-  } catch (error) {
-    if (req.signal?.aborted) throw new HighlightsCancelledError()
-    throw error
-  } finally {
-    req.signal?.removeEventListener('abort', onAbort)
-  }
+export function detectHighlights(req: DetectRequest): Promise<readonly Peak[]> {
+  return runAbortable({
+    enqueue: runExclusive,
+    task: () => decode(req),
+    signal: req.signal,
+    terminate: resetFFmpeg,
+    cancelled: () => new HighlightsCancelledError()
+  })
 }
 
 async function decode({ file, trackIndex, durationSeconds, onProgress, signal }: DetectRequest): Promise<readonly Peak[]> {

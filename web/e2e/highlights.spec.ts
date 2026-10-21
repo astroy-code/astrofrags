@@ -29,6 +29,8 @@ test('tapping a moment adds a clip around it, and tapping it again selects that 
   await expect(page.getByTestId('clip-item')).toHaveCount(2)
   await expect(page.getByTestId('clip-item').nth(1)).toContainText('0:08.0')
   await expect(page.getByTestId('clip-item').nth(1).locator('.clip-select')).toHaveAttribute('aria-pressed', 'true')
+  // The list stays, so the next moment is one tap away.
+  await expect(page.getByTestId('highlight-moment')).toHaveCount(2)
 
   await page.getByTestId('clip-item').nth(0).locator('.clip-select').click()
   await page.getByTestId('highlight-moment').nth(0).click()

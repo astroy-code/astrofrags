@@ -36,3 +36,12 @@ test('pcm that is not a whole number of samples is still read', () => {
   assert.deepEqual(pcmPeaks(new Uint8Array(3)), [])
   assert.deepEqual(pcmPeaks(new Uint8Array(0)), [])
 })
+
+test('pcm that starts at an odd offset in its buffer is read the same', () => {
+  const samples = new Int16Array(8000).fill(100)
+  samples.fill(20000, 4000, 4800)
+  const aligned = new Uint8Array(samples.buffer)
+  const shifted = new Uint8Array(aligned.length + 1)
+  shifted.set(aligned, 1)
+  assert.deepEqual(pcmPeaks(shifted.subarray(1)), pcmPeaks(aligned))
+})

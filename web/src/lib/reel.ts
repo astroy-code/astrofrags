@@ -80,7 +80,8 @@ export function clipFromRange(source: ClipItem, objectUrl: string, range: TrimRa
     audioTrackOverride: source.audioTrackOverride,
     previewBroken: false,
     sizeWarningDismissed: true,
-    highlights: null,
+    // The list stays on screen after a tap, so the next moment is one tap away.
+    highlights: source.highlights,
     videoSize: source.videoSize
   }
 }

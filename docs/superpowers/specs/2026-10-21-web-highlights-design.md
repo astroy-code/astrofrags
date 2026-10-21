@@ -40,9 +40,11 @@ automatic detection on load, session history, captions, a hard limit on file len
   exactly as the **Fit to 3:00** button would.
 - New clips share the recording's `File` (nothing is copied), get their own preview URL, and start
   with the recording's duration, size and audio facts so they are exportable at once. Each keeps
-  its own trim and audio-track choice. Highlights are kept only on the recording's clip.
+  its own trim and audio-track choice. Moment clips carry the recording's list of moments, so it stays on screen after a tap.
 - Pressing **Start over**, removing the clip, or starting an export while detection runs cancels
-  the detection; a late result for a removed clip is dropped.
+  the detection; a late result for a removed clip is dropped. Cancelling a search still waiting in
+  the queue only drops it; the engine is stopped only when the search itself is running, so other
+  clips' audio checks are never harmed.
 
 ## Constraints
 

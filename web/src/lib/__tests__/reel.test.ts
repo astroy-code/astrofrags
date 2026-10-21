@@ -194,7 +194,8 @@ test('a clip made from a range keeps the file and what is known about it', () =>
   assert.equal(made.audioTrackCount, 1)
   assert.equal(made.audioTrackOverride, 0)
   assert.deepEqual(made.audioLevels, source.audioLevels)
-  assert.equal(made.highlights, null)
+  // The moments stay on screen after a tap, so the next one is a tap away.
+  assert.deepEqual(made.highlights, source.highlights)
   assert.equal(made.previewBroken, false)
 })
 
