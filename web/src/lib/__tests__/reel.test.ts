@@ -3,10 +3,14 @@ import assert from 'node:assert/strict'
 import {
   addClips,
   clearReel,
+  clipFromRange,
+  clipsOfFile,
   createClip,
   emptyReel,
+  insertClipsAfter,
   moveClip,
   removeClip,
+  replaceClip,
   selectClip,
   selectedClip,
   setMusic,
@@ -160,4 +164,81 @@ test('music only cannot be switched on without music', () => {
 test('clearing the reel switches music only off', () => {
   const on = setMuteOriginal(setMusic(three(), file('song.mp3')), true)
   assert.equal(clearReel(on).muteOriginal, false)
+})
+
+const probed = (name: string) => ({
+  ...item(name),
+  duration: 120,
+  range: { start: 0, end: 120 },
+  audioLevels: [{ rms: 0.1, peak: 0.5 }],
+  audioTrackCount: 1,
+  audioProbeDone: true,
+  audioTrackOverride: 0,
+  videoSize: { width: 1280, height: 720 },
+  highlights: [{ time: 30, score: 1 }]
+})
+
+test('a new clip has no highlights yet', () => {
+  assert.equal(item('a').highlights, null)
+})
+
+test('a clip made from a range keeps the file and what is known about it', () => {
+  const source = addClips(emptyReel(), [probed('rec')]).clips[0]
+  const made = clipFromRange(source, 'blob:new', { start: 25, end: 33 })
+  assert.equal(made.file, source.file)
+  assert.equal(made.objectUrl, 'blob:new')
+  assert.deepEqual(made.range, { start: 25, end: 33 })
+  assert.equal(made.duration, 120)
+  assert.deepEqual(made.videoSize, { width: 1280, height: 720 })
+  assert.equal(made.audioProbeDone, true)
+  assert.equal(made.audioTrackCount, 1)
+  assert.equal(made.audioTrackOverride, 0)
+  assert.deepEqual(made.audioLevels, source.audioLevels)
+  assert.equal(made.highlights, null)
+  assert.equal(made.previewBroken, false)
+})
+
+test('clips are inserted right after a clip, selected first, with fresh ids', () => {
+  const reel = frozen(three())
+  const next = insertClipsAfter(reel, 1, [item('x'), item('y')])
+  assert.deepEqual(names(next), ['a', 'x', 'y', 'b', 'c'])
+  assert.equal(next.selectedId, next.clips[1].id)
+  assert.equal(new Set(next.clips.map((clip) => clip.id)).size, 5)
+  assert.equal(next.nextId, reel.nextId + 2)
+})
+
+test('inserting after an unknown clip, or inserting nothing, changes nothing', () => {
+  const reel = three()
+  assert.equal(insertClipsAfter(reel, 99, [item('x')]), reel)
+  assert.equal(insertClipsAfter(reel, 1, []), reel)
+})
+
+test('replacing a clip puts the new ones at its place and selects the first', () => {
+  const reel = frozen(three())
+  const next = replaceClip(reel, 2, [item('x'), item('y')])
+  assert.deepEqual(names(next), ['a', 'x', 'y', 'c'])
+  assert.equal(next.selectedId, next.clips[1].id)
+  assert.equal(next.nextId, reel.nextId + 2)
+})
+
+test('replacing an unknown clip, or replacing with nothing, changes nothing', () => {
+  const reel = three()
+  assert.equal(replaceClip(reel, 99, [item('x')]), reel)
+  assert.equal(replaceClip(reel, 2, []), reel)
+})
+
+test('clips of a file are those that share the File, optionally except one', () => {
+  const shared = file('rec')
+  const reel = addClips(emptyReel(), [
+    createClip(shared, 'blob:1'),
+    createClip(file('other'), 'blob:2'),
+    createClip(shared, 'blob:3')
+  ])
+  assert.deepEqual(clipsOfFile(reel, shared).map((clip) => clip.id), [1, 3])
+  assert.deepEqual(clipsOfFile(reel, shared, 1).map((clip) => clip.id), [3])
+})
+
+test('a late highlights result for a removed clip is dropped', () => {
+  const reel = removeClip(three(), 2)
+  assert.equal(updateClip(reel, 2, { highlights: [{ time: 1, score: 1 }] }), reel)
 })

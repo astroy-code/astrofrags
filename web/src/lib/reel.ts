@@ -1,4 +1,5 @@
 import type { TrackLevel } from './audioLevels.ts'
+import type { Peak } from './highlights.ts'
 import type { Size } from './outputGeometry.ts'
 import type { TrimRange } from './trimRange.ts'
 
@@ -18,6 +19,8 @@ export interface ClipItem {
   readonly audioTrackOverride: number | null
   readonly previewBroken: boolean
   readonly sizeWarningDismissed: boolean
+  /** The loudest moments found in this clip's audio; null until "Find highlights" has run. */
+  readonly highlights: readonly Peak[] | null
   /** The video's displayed size; 0x0 until the preview reports it. */
   readonly videoSize: Size
 }
@@ -49,6 +52,7 @@ export function createClip(file: File, objectUrl: string): NewClip {
     audioTrackOverride: null,
     previewBroken: false,
     sizeWarningDismissed: false,
+    highlights: null,
     videoSize: { width: 0, height: 0 }
   }
 }
@@ -62,6 +66,54 @@ export function addClips(reel: Reel, items: readonly NewClip[]): Reel {
     nextId: reel.nextId + items.length
   }
 }
+
+/** A clip of the same recording with its own trim, ready to export without probing again. */
+export function clipFromRange(source: ClipItem, objectUrl: string, range: TrimRange): NewClip {
+  return {
+    file: source.file,
+    objectUrl,
+    duration: source.duration,
+    range,
+    audioLevels: source.audioLevels,
+    audioTrackCount: source.audioTrackCount,
+    audioProbeDone: source.audioProbeDone,
+    audioTrackOverride: source.audioTrackOverride,
+    previewBroken: false,
+    sizeWarningDismissed: true,
+    highlights: null,
+    videoSize: source.videoSize
+  }
+}
+
+/** Puts new clips right after a clip and selects the first of them. */
+export function insertClipsAfter(reel: Reel, afterId: number, items: readonly NewClip[]): Reel {
+  const index = reel.clips.findIndex((clip) => clip.id === afterId)
+  if (index < 0 || items.length === 0) return reel
+  const added = items.map((item, offset): ClipItem => ({ ...item, id: reel.nextId + offset }))
+  return {
+    ...reel,
+    clips: [...reel.clips.slice(0, index + 1), ...added, ...reel.clips.slice(index + 1)],
+    selectedId: added[0].id,
+    nextId: reel.nextId + items.length
+  }
+}
+
+/** Swaps a clip for new ones at its place and selects the first of them. */
+export function replaceClip(reel: Reel, id: number, items: readonly NewClip[]): Reel {
+  const index = reel.clips.findIndex((clip) => clip.id === id)
+  if (index < 0 || items.length === 0) return reel
+  const added = items.map((item, offset): ClipItem => ({ ...item, id: reel.nextId + offset }))
+  return {
+    ...reel,
+    clips: [...reel.clips.slice(0, index), ...added, ...reel.clips.slice(index + 1)],
+    selectedId: added[0].id,
+    nextId: reel.nextId + items.length
+  }
+}
+
+/** The clips cut from one picked file, optionally leaving out one of them. */
+export const clipsOfFile = (reel: Reel, file: File, exceptId?: number): readonly ClipItem[] =>
+  reel.clips.filter((clip) => clip.file === file && clip.id !== exceptId)
 
 export function removeClip(reel: Reel, id: number): Reel {
   const index = reel.clips.findIndex((clip) => clip.id === id)
