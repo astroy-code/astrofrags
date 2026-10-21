@@ -77,7 +77,7 @@ async function withMountedFiles<T>(
   }
 }
 
-function withMountedFile<T>(ffmpeg: FFmpeg, file: File, run: (inputPath: string) => Promise<T>): Promise<T> {
+export function withMountedFile<T>(ffmpeg: FFmpeg, file: File, run: (inputPath: string) => Promise<T>): Promise<T> {
   return withMountedFiles(ffmpeg, [{ name: INPUT_PREFIX + '0', file }], ([inputPath]) => run(inputPath))
 }
 

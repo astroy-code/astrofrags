@@ -242,3 +242,24 @@ export async function makeSilentWav(durationSeconds: number): Promise<Uint8Array
   if (run.exitCode !== 0) throw new Error(`could not make the silent wav:\n${run.log.slice(-400)}`)
   return run.read('silence.wav')
 }
+
+export interface BurstClipOptions {
+  readonly seconds: number
+  /** Start times of 0.4 s loud bursts over an otherwise quiet tone. */
+  readonly bursts: readonly number[]
+}
+
+const BURST_SECONDS = 0.4
+
+/** A small clip with a quiet bed and loud bursts at known times, to test highlight detection. */
+export async function makeBurstClip({ seconds, bursts }: BurstClipOptions): Promise<Uint8Array> {
+  const loud = bursts.map((start) => `between(t,${start},${start + BURST_SECONDS})`).join('+') || '0'
+  const run = await runCore([
+    '-f', 'lavfi', '-i', `testsrc=duration=${seconds}:size=160x90:rate=5`,
+    '-f', 'lavfi', '-i', `sine=frequency=300:duration=${seconds}`,
+    '-af', `volume='0.02+0.9*(${loud})':eval=frame`,
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', 'bursts.mp4'
+  ])
+  if (run.exitCode !== 0) throw new Error(`could not make the burst clip:\n${run.log.slice(-400)}`)
+  return run.read('bursts.mp4')
+}

@@ -6,6 +6,9 @@ const MERGE_GAP_SECONDS = 3
 const PEAK_STDDEV_MULTIPLIER = 3
 const MAX_PEAKS = 12
 const FULL_SCALE = 32768
+/** The rate the page decodes at; loudness peaks are the same as at desktop's 16 kHz for half the memory. */
+export const HIGHLIGHT_SAMPLE_RATE = 8000
+const BYTES_PER_SAMPLE = 2
 
 export const HIGHLIGHT_PAD_BEFORE = 5
 export const HIGHLIGHT_PAD_AFTER = 3
@@ -53,6 +56,14 @@ export function findPeaks(windows: readonly number[]): Peak[] {
     }
   })
   return [...merged].sort((a, b) => b.score - a.score).slice(0, MAX_PEAKS)
+}
+
+/** Peaks of raw little-endian 16-bit mono PCM at HIGHLIGHT_SAMPLE_RATE (any trailing odd byte is ignored). */
+export function pcmPeaks(pcm: Uint8Array): Peak[] {
+  // Copy so the Int16Array view starts on an aligned buffer, whatever offset the bytes came from.
+  const bytes = pcm.slice()
+  const samples = new Int16Array(bytes.buffer, 0, Math.floor(bytes.length / BYTES_PER_SAMPLE))
+  return findPeaks(rmsPerWindow(samples, HIGHLIGHT_SAMPLE_RATE))
 }
 
 /** The clip that frames a moment: 5 s before to 3 s after, kept inside the recording. */
