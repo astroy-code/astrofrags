@@ -2,6 +2,8 @@
 
 A desktop app that finds the highlight moments in your gameplay recordings and lets you turn them into clips or a combined reel — built for solo/small-scale use, no cloud upload required.
 
+**Try it in your browser: <https://astroy-code.github.io/astrofrags/>** (the [web version](#web-version), works on phones too; nothing is uploaded).
+
 ## Download
 
 Grab the latest Windows installer from the [Releases page](https://github.com/astroy-code/astrofrags/releases/latest). The app checks for and installs updates automatically after that.
@@ -21,7 +23,9 @@ Grab the latest Windows installer from the [Releases page](https://github.com/as
 
 ## Web version
 
-A browser build for quick jobs: pick a video, set a start and end, export the trimmed clip as an H.264 MP4, or pick several clips and join them into one reel. It runs entirely in your browser (ffmpeg.wasm), so nothing is uploaded, and it works on phones as well as desktops. It also carries a little of the desktop branding. Use the desktop app for long recordings and everything else (peak detection, captions, session history).
+A browser build of the app's main workflow, live at <https://astroy-code.github.io/astrofrags/>: pick a recording, find its loudest moments, trim clips (on a waveform or with sliders), join several into a reel with transitions, add branding and music, and export an H.264 MP4 in the desktop's four formats. It runs entirely in your browser (ffmpeg.wasm), so nothing is uploaded, and it works on phones as well as desktops.
+
+Not in the web version: captions (the local speech-to-text model), the Rainbow Six Siege kill-feed detector, session history, folder watching and auto-update. Use the desktop app for those, and for very large recordings.
 
 - **Large files:** above roughly 500 MB on desktop (200 MB on phones) the page warns that the browser may run out of memory. It never blocks you.
 - **HEVC/H.265 recordings:** whether the picture plays depends on your browser and device (Safari and recent Android Chrome use the device's hardware decoder). If it can't decode the video, the page says so and points you to the desktop app.
